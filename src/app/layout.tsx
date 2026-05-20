@@ -10,26 +10,21 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: "amarchat — AI-Powered WhatsApp Automation",
+    template: "%s — amarchat",
   },
-  description: "Self-hostable CRM template for WhatsApp.",
+  description: "Automate your sales, scale support, and send official WhatsApp broadcasts without number bans.",
   robots: {
-    index: false,
-    follow: false,
+    index: true,
+    follow: true,
   },
   icons: {
-    icon: [{ url: "/icon" }],
-  },
-  formatDetection: {
-    email: false,
-    address: false,
-    telephone: false,
+    icon: [{ url: "/favicon.ico" }],
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#020617",
+  themeColor: "#09090b",
   colorScheme: "dark",
 };
 
@@ -40,15 +35,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full bg-slate-950 text-white font-sans">
+      <body className="min-h-full bg-[#09090b] text-white font-sans selection:bg-indigo-500/30">
         {children}
         <Toaster
           theme="dark"
           position="top-right"
           toastOptions={{
             style: {
-              background: "rgb(30 41 59)",
-              border: "1px solid rgb(51 65 85)",
+              background: "#18181b",
+              border: "1px solid #27272a",
               color: "white",
             },
           }}

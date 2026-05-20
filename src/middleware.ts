@@ -25,8 +25,9 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Auth pages - redirect to dashboard if already logged in
+  // ১. ইউজার অলরেডি লগইন করা থাকলে ল্যান্ডিং পেজ ('/') অথবা অথ পেজগুলোতে আসলে সরাসরি ড্যাশবোর্ডে রিডাইরেক্ট হবে
   if (user && (
+    request.nextUrl.pathname === '/' ||
     request.nextUrl.pathname === '/login' ||
     request.nextUrl.pathname === '/signup' ||
     request.nextUrl.pathname === '/forgot-password'
@@ -36,7 +37,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Protected pages - redirect to login if not authenticated
+  // ২. সুরক্ষিত পেজসমূহ - লগইন ছাড়া অ্যাক্সেস করার চেষ্টা করলে সরাসরি লগইন পেজে রিডাইরেক্ট হবে
   const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
@@ -44,7 +45,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // API routes that need auth (not webhooks)
+  // ৩. অথরাইজড এপিআই রুটস (ওয়েবহুক বাদে) সুরক্ষিত করা
   if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

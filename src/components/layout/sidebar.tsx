@@ -110,13 +110,21 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-4">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            {/* amarchat রিব্র্যান্ডেড লোগো আইকন */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500 shadow-sm shadow-violet-500/20">
               <MessageSquare className="h-4 w-4 text-white" />
             </div>
-            <span className="text-sm font-semibold text-white">
-              CRM Template for WhatsApp
-            </span>
+            
+            {/* নতুন ব্র্যান্ড নেম ও সাবটাইটেল */}
+            <div className="flex flex-col">
+              <span className="text-base font-extrabold tracking-tight text-white leading-none">
+                amar<span className="text-violet-500">chat</span>
+              </span>
+              <span className="text-[10px] font-medium tracking-wider text-slate-500 uppercase leading-none mt-1">
+                WhatsApp CRM
+              </span>
+            </div>
           </Link>
           <button
             type="button"
