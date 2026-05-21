@@ -34,7 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} h-full antialiased`}>
+    // এখানে suppressHydrationWarning যুক্ত করা হয়েছে
+    <html lang="en" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full bg-[#09090b] text-white font-sans selection:bg-indigo-500/30">
         {children}
         <Toaster
