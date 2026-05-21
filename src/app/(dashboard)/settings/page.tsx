@@ -116,7 +116,7 @@ export default function SettingsPage() {
           console.log("Logged In User Auth ID is:", user.id);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("System exception:", err);
     } finally {
       setCheckingStatus(false);
@@ -131,8 +131,8 @@ export default function SettingsPage() {
   const queryTab = searchParams.get('tab');
   const tab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
 
-  const activeApproved = localProfile ? localProfile.is_approved : cachedProfile?.is_approved;
-  const activeExpiry = localProfile ? localProfile.subscription_expires_at : cachedProfile?.subscription_expires_at;
+const activeApproved = localProfile ? localProfile.is_approved : (cachedProfile as unknown as { is_approved?: boolean })?.is_approved;
+const activeExpiry = localProfile ? localProfile.subscription_expires_at : (cachedProfile as unknown as { subscription_expires_at?: string | null })?.subscription_expires_at;
 
   const isSubscriptionActive = 
     !!activeApproved && 
