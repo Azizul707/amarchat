@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+// গ্লোবাল ওয়ার্কস্পেস স্টেট হুক ইম্পোর্ট
+import { useWorkspace } from "@/providers/workspace-provider";
 import { cn } from "@/lib/utils";
 import type {
   Conversation,
@@ -114,6 +116,7 @@ export function MessageThread({
   onBack,
 }: MessageThreadProps) {
   const { user } = useAuth();
+  const { workspace } = useWorkspace(); // 👈 গ্লোবাল ওয়ার্কস্পেস স্টেট মেমোরি থেকে ফেচ
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -121,15 +124,18 @@ export function MessageThread({
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
 
-  // Profiles are bounded by RLS to rows the current user is allowed to
-  // see — today that's just the current user, but the dropdown keeps the
-  // shape ready for shared-team workspaces without a refactor.
+  // Profiles এর কুয়েরিতে রিয়েল-টাইম active 'workspace_id' ফিল্টারিং সেট করা হয়েছে [1]
   useEffect(() => {
+    if (!workspace?.id) {
+      setProfiles([]);
+      return;
+    }
     let cancelled = false;
     const supabase = createClient();
     supabase
       .from("profiles")
       .select("*")
+      .eq("workspace_id", workspace.id) // 👈 শুধুমাত্র কারেন্ট ওয়ার্কস্পেসের এজেন্টদের নিয়ে আসবে
       .order("full_name")
       .then(({ data, error }) => {
         if (cancelled) return;
@@ -142,7 +148,7 @@ export function MessageThread({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspace?.id]); // 👈 ওয়ার্কস্পেস পরিবর্তন হলে যেন অটো রিলোড হয়
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -697,7 +703,7 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Assign dropdown */}
+          {/* Assign dropdown (গ্লোবাল লিস্টের বদলে এখন শুধু নিজের ওয়ার্কস্পেসের এজেন্টদের মেম্বার লিস্ট দেখাবে) */}
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
@@ -730,7 +736,7 @@ export function MessageThread({
                       )}
                     >
                       <span className="flex-1">
-                        {p.full_name}
+                        {p.full_name || "Unnamed Agent"}
                         {p.user_id === user?.id ? " (me)" : ""}
                       </span>
                       {isSelected && <Check className="ml-2 h-3 w-3" />}

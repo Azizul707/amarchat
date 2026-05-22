@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient()
 
+    // ১. কারেন্ট লগইন করা ইউজারের (ওনার বা এজেন্ট) অথ সেশন নিশ্চিত করা
     const {
       data: { user },
       error: authError,
@@ -27,6 +28,33 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
+      )
+    }
+
+    // ২. রিয়েল-টাইম ওয়ার্কস্পেসের মেম্বারশিপ এবং ওনারের আইডি বের করা
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (profileError || !profile || !profile.workspace_id) {
+      return NextResponse.json(
+        { error: 'Workspace profile not found. Please setup profile.' },
+        { status: 400 }
+      )
+    }
+
+    const { data: workspace, error: wsError } = await supabase
+      .from('workspaces')
+      .select('owner_id')
+      .eq('id', profile.workspace_id)
+      .maybeSingle()
+
+    if (wsError || !workspace) {
+      return NextResponse.json(
+        { error: 'Active workspace configuration not found.' },
+        { status: 400 }
       )
     }
 
@@ -69,12 +97,12 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch conversation and contact
+    // ৩. কনভারসেশন কুয়েরি: ওনার বা এজেন্ট যেই হোক, ওয়ার্কস্পেস আইডি দিয়ে কুয়েরি করা হবে [1]
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .select('*, contact:contacts(*)')
       .eq('id', conversation_id)
-      .eq('user_id', user.id)
+      .eq('workspace_id', profile.workspace_id) // 👈 user_id এর বদলে workspace_id ব্যবহার করা হয়েছে
       .single()
 
     if (convError || !conversation) {
@@ -101,11 +129,11 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch and decrypt WhatsApp config
+    // ৪. কনফিগ কুয়েরি: ওয়ার্কস্পেস ওনারের আইডির বিপরীতে কনফিগারেশন ও টোকেন রিট্রিভ করা [1]
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', workspace.owner_id) // 👈 এজেন্টের বদলে ওনারের আইডির কনফিগ ও টোকেন রিড করা হচ্ছে
       .single()
 
     if (configError || !config) {

@@ -7,7 +7,13 @@ import {
   UserPlus,
   DollarSign,
   Send,
+  ShieldCheck,
+  ShieldAlert,
+  RefreshCw,
 } from 'lucide-react'
+
+// গ্লোবাল ওয়ার্কস্পেস স্টেট হুক ইম্পোর্ট
+import { useWorkspace } from '@/providers/workspace-provider'
 
 import {
   loadActivity,
@@ -35,6 +41,9 @@ import { ActivityFeed } from '@/components/dashboard/activity-feed'
 type RangeDays = 7 | 30 | 90
 
 export default function DashboardPage() {
+  // গ্লোবাল ওয়ার্কস্পেস ইনফরমেশন ফেচ
+  const { workspace, profile, refresh: refreshWorkspace } = useWorkspace()
+
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
 
@@ -97,6 +106,12 @@ export default function DashboardPage() {
     loadAll()
   }, [loadAll])
 
+  // রিফ্রেশ বাটন ক্লিক করলে মেট্রিক্স কোয়েরি এবং গ্লোবাল ওয়ার্কস্পেস স্টেট উভয়ই রিফ্রেশ হবে
+  const handleRefreshAll = useCallback(() => {
+    loadAll()
+    void refreshWorkspace()
+  }, [loadAll, refreshWorkspace])
+
   // Range switch handler — kept in an event callback (not an effect)
   // so the setState calls stay out of the react-hooks/set-state-in-effect
   // rule's way. The cached bucket check means switching back to a
@@ -117,15 +132,56 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Live analytics across conversations, contacts, deals, broadcasts, and automations.
-        </p>
+      {/* Header (ওয়ার্কস্পেসের নামের সাথে সিঙ্ক করা হয়েছে এবং রিফ্রেশ বাটন অ্যাড করা হয়েছে) */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">
+            {workspace?.name || 'Dashboard'}
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Live analytics across conversations, contacts, deals, broadcasts, and automations.
+          </p>
+        </div>
+        <div>
+          <button 
+            onClick={handleRefreshAll}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white transition text-sm font-medium shadow-sm cursor-pointer"
+          >
+            <RefreshCw className="h-4 w-4" /> Refresh Data
+          </button>
+        </div>
       </div>
 
-      {/* Metric cards */}
+      {/* সাবস্ক্রিপশন এবং ভেরিফিকেশন স্ট্যাটাস ব্যানার (মার্জ করা হয়েছে) */}
+      {profile && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl border bg-zinc-900/20 border-zinc-800">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${profile.is_approved ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+              {profile.is_approved ? <ShieldCheck className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-zinc-200">
+                {profile.is_approved ? 'প্রিমিয়াম সাবস্ক্রিপশন অ্যাক্টিভ' : 'অ্যাকাউন্ট ভেরিফিকেশন পেন্ডিং'}
+              </p>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {profile.is_approved 
+                  ? `মেয়াদ শেষ হবে: ${new Date(profile.subscription_expires_at!).toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' })}`
+                  : 'আপনার অ্যাকাউন্টটি অনুমোদনের অপেক্ষায় আছে। অনুমোদন হওয়ার পর সব সিস্টেম সচল হবে।'}
+              </p>
+            </div>
+          </div>
+          {!profile.is_approved && (
+            <a 
+              href="mailto:developer.arafin@gmail.com" 
+              className="text-xs font-semibold px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-lg transition"
+            >
+              যোগাযোগ করুন
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Metric cards (সম্পূর্ণ অরিজিনাল কোড বজায় রাখা হয়েছে) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {metricsLoading || !metrics ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
@@ -176,16 +232,10 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Quick actions */}
+      {/* Quick actions (সম্পূর্ণ অরিজিনাল কোড বজায় রাখা হয়েছে) */}
       <QuickActions />
 
-      {/* Charts row */}
-      {/* items-stretch (the grid default) stretches the two columns to
-          match the tallest sibling; adding h-full on each wrapper and
-          on the inner panels makes both cards actually fill that
-          stretched height so their rounded borders line up. Without
-          this, the pipeline card rendered at its natural (shorter)
-          height while the line chart drove the row height. */}
+      {/* Charts row (সম্পূর্ণ অরিজিনাল কোড বজায় রাখা হয়েছে) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="h-full lg:col-span-3">
           <ConversationsChart
@@ -200,10 +250,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Response time */}
+      {/* Response time (সম্পূর্ণ অরিজিনাল কোড বজায় রাখা হয়েছে) */}
       <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
 
-      {/* Activity feed */}
+      {/* Activity feed (সম্পূর্ণ অরিজিনাল কোড বজায় রাখা হয়েছে) */}
       <ActivityFeed items={activity} loading={activityLoading} />
     </div>
   )

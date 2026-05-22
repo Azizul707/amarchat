@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { DashboardShell } from "./dashboard-shell";
+// WorkspaceProvider ইম্পোর্ট করুন (আপনার পাথ অনুযায়ী সেট করুন, যেমন "@/providers/workspace-provider")
+import { WorkspaceProvider } from "@/providers/workspace-provider"; 
 
 // Server layout whose only job is to declare "do not index" metadata
 // for the authed app. robots.ts already disallows these paths at the
@@ -24,5 +26,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return (
+    <WorkspaceProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </WorkspaceProvider>
+  );
 }
