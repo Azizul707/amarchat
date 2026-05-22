@@ -18,7 +18,7 @@ const DOCS_SECTIONS = [
         <ul className="list-decimal pl-5 text-xs text-zinc-400 space-y-2 leading-relaxed">
           <li>প্রথমে আমদের প্যানেলে একটি অ্যাকাউন্ট তৈরি (Sign Up) করুন।</li>
           <li>আপনার অ্যাকাউন্টটি সচল করতে এডমিনের সাথে যোগাযোগ করে ট্রায়াল বা পেইড প্ল্যানটি চালু করিয়ে নিন।</li>
-          <li>এরপর আপনার "Settings &gt; Workspace" ট্যাবে গিয়ে আপনার ব্র্যান্ডের নাম সেট করে নিন।</li>
+          <li>এরপর আপনার &quot;Settings &gt; Workspace&quot; ট্যাবে গিয়ে আপনার ব্র্যান্ডের নাম সেট করে নিন।</li>
         </ul>
       </div>
     ),
@@ -56,7 +56,7 @@ const DOCS_SECTIONS = [
         <h3 className="text-sm font-semibold text-zinc-200 mt-4">কাজের নিয়মাবলি:</h3>
         <ul className="list-decimal pl-5 text-xs text-zinc-400 space-y-2 leading-relaxed">
           <li>প্রথমে আপনার এজেন্টকে আমাদের সাইটে গিয়ে একটি অ্যাকাউন্ট তৈরি করতে বলুন।</li>
-          <li>এজেন্ট অ্যাকাউন্ট তৈরি করার পর ওনার নিজের একাউন্ট থেকে <strong>Settings &gt; Team</strong> ট্যাবে গিয়ে এজেন্টের রেজিস্টার্ড ইমেইলটি লিখে "Add Agent" বাটনে ক্লিক করবেন।</li>
+          <li>এজেন্ট অ্যাকাউন্ট তৈরি করার পর ওনার নিজের একাউন্ট থেকে <strong>Settings &gt; Team</strong> ট্যাবে গিয়ে এজেন্টের রেজিস্টার্ড ইমেইলটি লিখে &quot;Add Agent&quot; বাটনে ক্লিক করবেন।</li>
           <li>এজেন্ট সাথে সাথে ওয়ার্কস্পেসে যুক্ত হয়ে যাবেন। এবার ইনবক্সে কাস্টমারের চ্যাটের ড্রপডাউন থেকে যেকোনো এজেন্টকে এসাইন করে দেওয়া যাবে।</li>
         </ul>
       </div>
@@ -75,7 +75,7 @@ const DOCS_SECTIONS = [
         <h3 className="text-sm font-semibold text-zinc-200 mt-4">কীভাবে ক্যাম্পেইন পাঠাবেন:</h3>
         <ul className="list-decimal pl-5 text-xs text-zinc-400 space-y-2 leading-relaxed">
           <li>প্রথমে মেটা পোর্টাল থেকে আপনার অফার মেসেজটির জন্য একটি নতুন <strong>Message Template</strong> বানিয়ে অনুমোদন করিয়ে নিন।</li>
-          <li>অনুমোদন হওয়ার পর আমদের সেটিংসের "Templates" ট্যাবে সেটি অটোমেটিক লোড হবে।</li>
+          <li>অনুমোদন হওয়ার পর আমদের সেটিংসের &quot;Templates&quot; ট্যাবে সেটি অটোমেটিক লোড হবে।</li>
           <li>এরপর ব্রডকাস্ট সেকশন থেকে টেমপ্লেটটি সিলেক্ট করে আপনার পুরাতন কাস্টমারদের ডেস্টিনেশন বা কন্টাক্ট লিস্ট সিলেক্ট করে এক ক্লিকে ক্যাম্পেইন সচল করুন।</li>
         </ul>
       </div>

@@ -58,8 +58,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Per-user rate limit. Bucket key is scoped to this route so
-    // `/broadcast` has an independent budget.
+    // Per-user rate limit.
     const limit = checkRateLimit(`send:${user.id}`, RATE_LIMITS.send)
     if (!limit.success) {
       return rateLimitResponse(limit)
@@ -68,7 +67,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       conversation_id,
-      message_type,
+      message_type, // 'text', 'template', 'image', 'video', 'audio', 'document'
       content_text,
       media_url,
       template_name,
@@ -97,12 +96,20 @@ export async function POST(request: Request) {
       )
     }
 
-    // ৩. কনভারসেশন কুয়েরি: ওনার বা এজেন্ট যেই হোক, ওয়ার্কস্পেস আইডি দিয়ে কুয়েরি করা হবে [1]
+    // মিডিয়া মেসেজগুলোর জন্য লিংক থাকা বাধ্যতামূলক
+    if (['image', 'video', 'audio', 'document'].includes(message_type) && !media_url) {
+      return NextResponse.json(
+        { error: `media_url is required for ${message_type} messages` },
+        { status: 400 }
+      )
+    }
+
+    // ৩. কনভারসেশন কুয়েরি: ওয়ার্কস্পেস আইডি দিয়ে কুয়েরি করা হবে [1]
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .select('*, contact:contacts(*)')
       .eq('id', conversation_id)
-      .eq('workspace_id', profile.workspace_id) // 👈 user_id এর বদলে workspace_id ব্যবহার করা হয়েছে
+      .eq('workspace_id', profile.workspace_id)
       .single()
 
     if (convError || !conversation) {
@@ -133,7 +140,7 @@ export async function POST(request: Request) {
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('user_id', workspace.owner_id) // 👈 এজেন্টের বদলে ওনারের আইডির কনফিগ ও টোকেন রিড করা হচ্ছে
+      .eq('user_id', workspace.owner_id)
       .single()
 
     if (configError || !config) {
@@ -145,11 +152,7 @@ export async function POST(request: Request) {
 
     const accessToken = decrypt(config.access_token)
 
-    // Self-heal legacy CBC-encrypted tokens. Fire-and-forget: we
-    // return from the send without waiting, so a failed upgrade just
-    // means the next send tries again. The upgrade is idempotent —
-    // concurrent sends both produce valid GCM ciphertexts of the same
-    // plaintext, last write wins.
+    // Self-heal legacy CBC-encrypted tokens.
     if (isLegacyFormat(config.access_token)) {
       void supabase
         .from('whatsapp_config')
@@ -165,10 +168,7 @@ export async function POST(request: Request) {
         })
     }
 
-    // Resolve the reply target (if any) to its Meta message_id, which is
-    // what `context.message_id` on the outgoing Meta payload needs. The
-    // parent must belong to this same conversation — otherwise a caller
-    // could quote messages they can't see by guessing UUIDs.
+    // Resolve the reply target (if any) to its Meta message_id
     let contextMessageId: string | undefined
     if (reply_to_message_id) {
       const { data: parent, error: parentError } = await supabase
@@ -185,9 +185,6 @@ export async function POST(request: Request) {
         )
       }
       if (!parent.message_id) {
-        // Parent never reached Meta (still in 'sending' or 'failed') — we
-        // can't quote it on WhatsApp. Send without context rather than
-        // dropping the message entirely.
         console.warn(
           '[whatsapp/send] reply target has no Meta message_id; sending without context'
         )
@@ -196,15 +193,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Send via Meta API — retry with phone-number variants if Meta rejects
-    // with "recipient not in allowed list" (common in sandbox / when a
-    // number was registered with/without a trunk 0). If an alternate
-    // format succeeds, we persist it back to the contact row so the
-    // next send goes through on the first attempt.
+    // ৫. মেটা এপিআই-এর মাধ্যমে টেক্সট, টেমপ্লেট অথবা মিডিয়া মেসেজ পাঠানো
     let waMessageId = ''
     let workingPhone = sanitizedPhone
 
     const attempt = async (phone: string): Promise<string> => {
+      // ক) অফিশিয়াল টেমপ্লেট মেসেজ পাঠানো
       if (message_type === 'template') {
         const result = await sendTemplateMessage({
           phoneNumberId: config.phone_number_id,
@@ -216,6 +210,49 @@ export async function POST(request: Request) {
         })
         return result.messageId
       }
+
+      // খ) অফিশিয়াল মিডিয়া মেসেজ পাঠানো (ইমেজ, ভিডিও, অডিও, ডকুমেন্ট)
+      if (['image', 'video', 'audio', 'document'].includes(message_type)) {
+        const url = `https://graph.facebook.com/v22.0/${config.phone_number_id}/messages`
+        
+        // মেটার অফিশিয়াল মিডিয়া লিঙ্ক পেলোড তৈরি করা
+        const payload: any = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: phone,
+          type: message_type,
+          [message_type]: {
+            link: media_url,
+            // ডকুমেন্টের ক্ষেত্রে ফাইলের নাম সেট করা
+            ...(message_type === 'document' && { filename: content_text || 'Document' }),
+            // ইমেজ বা ভিডিওর সাথে ক্যাপশন টেক্সট থাকলে তা পাস করা
+            ...(message_type === 'image' && content_text && { caption: content_text }),
+            ...(message_type === 'video' && content_text && { caption: content_text }),
+          },
+        }
+
+        if (contextMessageId) {
+          payload.context = { message_id: contextMessageId }
+        }
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(payload),
+        })
+
+        const resData = await response.json()
+        if (!response.ok) {
+          throw new Error(resData?.error?.message || `Meta API media send failed with HTTP ${response.status}`)
+        }
+
+        return resData.messages?.[0]?.id || ''
+      }
+
+      // গ) সাধারণ টেক্সট মেসেজ পাঠানো
       const result = await sendTextMessage({
         phoneNumberId: config.phone_number_id,
         accessToken,
@@ -238,9 +275,6 @@ export async function POST(request: Request) {
           break
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
-          // Only retry when the failure is specifically that the
-          // recipient isn't in Meta's allowed list. Any other error
-          // (bad token, invalid template, etc.) bubbles up immediately.
           if (!isRecipientNotAllowedError(message)) {
             throw err
           }
@@ -259,9 +293,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // If a non-original variant succeeded, update the contact so future
-    // sends go straight through. sanitizePhoneForMeta on workingPhone
-    // will yield workingPhone itself, so re-storing preserves it.
+    // Auto-correct contact format if alternative format succeeded
     if (workingPhone !== sanitizedPhone) {
       console.log(
         `[whatsapp/send] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
@@ -272,10 +304,7 @@ export async function POST(request: Request) {
         .eq('id', contact.id)
     }
 
-    // Insert message into DB — field names MUST match the messages schema
-    // (see supabase/migrations/001_initial_schema.sql):
-    //   conversation_id, sender_type, content_type, content_text,
-    //   media_url, template_name, message_id, status, created_at
+    // সুপাবেস ডাটাবেসে মেসেজ স্টোর করা (ছবি/ভিডিও/অডিও অনুযায়ী content_type সহ)
     const { data: messageRecord, error: msgError } = await supabase
       .from('messages')
       .insert({
@@ -300,7 +329,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Update conversation
+    // Update conversation list preview
     await supabase
       .from('conversations')
       .update({

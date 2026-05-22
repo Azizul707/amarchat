@@ -22,6 +22,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient();
 
+    // ১. কারেন্ট লগইন করা ইউজারের অথ সেশন নিশ্চিত করা
     const {
       data: { user },
       error: authError,
@@ -49,7 +50,34 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolve target message + its conversation; verify ownership.
+    // ২. রিয়েল-টাইম ওয়ার্কস্পেস মেম্বারশিপ ও ওনার ট্র্যাক করা [1]
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (profileError || !profile || !profile.workspace_id) {
+      return NextResponse.json(
+        { error: 'Workspace profile not found.' },
+        { status: 400 },
+      );
+    }
+
+    const { data: workspace, error: wsError } = await supabase
+      .from('workspaces')
+      .select('owner_id')
+      .eq('id', profile.workspace_id)
+      .maybeSingle();
+
+    if (wsError || !workspace) {
+      return NextResponse.json(
+        { error: 'Active workspace configuration not found.' },
+        { status: 400 },
+      );
+    }
+
+    // ৩. রিয়েল-টাইম মেসেজ ম্যাচিং
     const { data: targetMessage, error: msgError } = await supabase
       .from('messages')
       .select('id, message_id, conversation_id')
@@ -69,11 +97,12 @@ export async function POST(request: Request) {
       );
     }
 
+    // ৪. কনভারসেশন কুয়েরি: ইউজার আইডির বদলে ওয়ার্কস্পেস আইডি দিয়ে কুয়েরি করা (মাল্টি-টেন্যান্ট ফিক্স) [1]
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .select('id, user_id, contact:contacts(phone)')
       .eq('id', targetMessage.conversation_id)
-      .eq('user_id', user.id)
+      .eq('workspace_id', profile.workspace_id) // 👈 user_id এর বদলে workspace_id ব্যবহার করা হয়েছে
       .maybeSingle();
 
     if (convError || !conversation) {
@@ -93,11 +122,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // WhatsApp config + access token
+    // ৫. হোয়াটসঅ্যাপ কনফিগ ও টোকেন: ওয়ার্কস্পেস ওনারের আইডির বিপরীতে [1]
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('phone_number_id, access_token')
-      .eq('user_id', user.id)
+      .eq('user_id', workspace.owner_id) // 👈 ওনার আইডির কনফিগারেশন রিড করা হচ্ছে
       .single();
 
     if (configError || !config) {
