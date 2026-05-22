@@ -1,7 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+// নেক্সট-জেএস ১৬ কনভেনশন অনুযায়ী ফাংশনের নাম 'middleware' থেকে পরিবর্তন করে 'proxy' করা হয়েছে
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

@@ -54,10 +54,10 @@ export default function LandingPage() {
             <a href="#features" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
               Features
             </a>
-            <a href="#pricing" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+            <a href="/pricing" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
               Pricing
             </a>
-            <a href="#docs" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+            <a href="/docs" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
               Docs
             </a>
           </nav>
