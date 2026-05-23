@@ -66,12 +66,6 @@ interface MessageThreadProps {
     conversationId: string,
     assignedAgentId: string | null,
   ) => void;
-  /**
-   * On mobile, the thread is shown full-screen with the conversation list
-   * hidden. This callback lets the page deselect the active conversation
-   * and reveal the list again. Rendered as a back-arrow in the header on
-   * mobile only.
-   */
   onBack?: () => void;
 }
 
@@ -126,7 +120,7 @@ export function MessageThread({
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
   const [togglingAi, setTogglingAi] = useState(false);
 
-  // Profiles এর কুয়েরিতে রিয়েল-টাইম active 'workspace_id' ফিল্টারিং
+  // Profiles কুয়েরি
   useEffect(() => {
     if (!workspace?.id) {
       setProfiles([]);
@@ -156,7 +150,6 @@ export function MessageThread({
   const sessionInfo = useMemo(() => {
     if (!messages.length) return { expired: false, remaining: "" };
 
-    // Find last customer message
     const lastCustomerMsg = [...messages]
       .reverse()
       .find((m) => m.sender_type === "customer");
@@ -179,7 +172,6 @@ export function MessageThread({
     return { expired, remaining };
   }, [messages]);
 
-  // Store latest callback in a ref so fetchMessages doesn't need to depend on `onMessagesLoaded`
   const onMessagesLoadedRef = useRef(onMessagesLoaded);
   useEffect(() => {
     onMessagesLoadedRef.current = onMessagesLoaded;
@@ -188,7 +180,7 @@ export function MessageThread({
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
-  // Fetch messages whenever the selected conversation changes.
+  // Fetch messages on selected conversation changes
   useEffect(() => {
     if (!conversationId) return;
 
@@ -220,7 +212,7 @@ export function MessageThread({
     };
   }, [conversationId]);
 
-  // Reactions: fetch + realtime per conversation.
+  // Reactions fetch + realtime
   useEffect(() => {
     if (!conversationId) {
       setReactions([]);
@@ -307,12 +299,11 @@ export function MessageThread({
     };
   }, [conversationId]);
 
-  // Clear any reply draft on conversation change
   useEffect(() => {
     setReplyTo(null);
   }, [conversationId]);
 
-  // Reset unread_count to 0
+  // Reset unread count to 0
   useEffect(() => {
     if (!conversationId || !hasUnread) return;
     const supabase = createClient();
@@ -325,11 +316,22 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom
+  // ====================================================================
+  // অটো-স্ক্রল লজিক (Immediate + Delayed ল্যাগ ফিক্স করা হয়েছে) [1.2.7, 1.2.8]
+  // ====================================================================
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current;
+      
+      // ১. তাৎক্ষণিক স্ক্রল করার চেষ্টা
       el.scrollTop = el.scrollHeight;
+
+      // ২. ৫০ মিলি-সেকেন্ড ডিলে দিয়ে ফোর্সড স্ক্রল (যাতে ব্রাউজার নোড রেন্ডার শেষ করে স্ক্রল করতে পারে)
+      const timer = setTimeout(() => {
+        el.scrollTop = el.scrollHeight;
+      }, 50);
+
+      return () => clearTimeout(timer);
     }
   }, [messages]);
 
@@ -574,7 +576,6 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
-  // এআই কাস্টিং টাইপ সেফগার্ড (any কীওয়ার্ড বাদ দিয়ে 'unknown' ও 'Record' ব্যবহার করা হয়েছে) [1.2.7]
   const isAIActive = conversation 
     ? !!(conversation as unknown as Record<string, unknown>).ai_active 
     : false;
@@ -602,23 +603,6 @@ export function MessageThread({
       setTogglingAi(false);
     }
   };
-
-  // Empty state
-  if (!conversation || !contact) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-slate-950">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-800">
-          <MessageSquare className="h-8 w-8 text-slate-600" />
-        </div>
-        <h3 className="mt-4 text-sm font-medium text-slate-400">
-          Select a conversation
-        </h3>
-        <p className="mt-1 text-xs text-slate-600">
-          Choose a conversation from the left to start messaging
-        </p>
-      </div>
-    );
-  }
 
   const displayName = contact.name || contact.phone;
   const messageGroups = groupMessagesByDate(messages);
@@ -666,7 +650,6 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* নতুন এআই অ্যাসিস্ট্যান্ট কন্ট্রোল বাটন (১০০% টাইপ-সেফ ও এরর-ফ্রি) [1.2.7, 1.2.8] */}
           <button
             type="button"
             disabled={togglingAi}
