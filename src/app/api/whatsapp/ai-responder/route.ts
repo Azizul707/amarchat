@@ -13,10 +13,6 @@ export async function POST(request: Request) {
   try {
     // নিরাপত্তা যাচাই
     const secretHeader = request.headers.get('x-webhook-secret')
-     // 👈 এই দুটি ডিবাগ লাইন এখানে বসিয়ে সেভ করুন
-    console.log("সুপাবেস থেকে আসা সিক্রেট:", secretHeader);
-    console.log("এনভায়রনমেন্ট ফাইল থেকে পাওয়া সিক্রেট:", process.env.WEBHOOK_SECRET_KEY);
-
 
     if (secretHeader !== process.env.WEBHOOK_SECRET_KEY) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -102,10 +98,16 @@ export async function POST(request: Request) {
       'Authorization': `Bearer ${decryptedApiKey}`
     }
 
+    // if (aiBaseUrl.includes('openrouter')) {
+    //   customHeaders['HTTP-Referer'] = 'https://amarchat.vercel.app'
+    //   customHeaders['X-Title'] = 'amarchat CRM'
+    // }
+
     if (aiBaseUrl.includes('openrouter')) {
-      customHeaders['HTTP-Referer'] = 'https://amarchat.vercel.app'
-      customHeaders['X-Title'] = 'amarchat CRM'
-    }
+  // ডাইনামিকালি এনভায়রনমেন্ট ফাইল থেকে লিঙ্কটি রিড করবে
+  customHeaders['HTTP-Referer'] = process.env.NEXT_PUBLIC_SITE_URL || 'https://amarchat.vercel.app' 
+  customHeaders['X-Title'] = 'amarchat CRM'
+}
 
     const aiRes = await fetch(apiUrl, {
       method: 'POST',
