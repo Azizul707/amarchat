@@ -54,6 +54,9 @@ export function useRealtime({
           { event: "*", schema: "public", table: "messages" },
           (payload) => {
             console.log("📨 REALTIME NEW MESSAGE RECEIVED:", payload);
+            // ডাবল চেক করছি ফাংশনটি ঠিকঠাক ক্লায়েন্ট থেকে এসে পৌঁছেছে কি না
+            console.log("👉 Is onMessageRef.current defined?", !!onMessageRef.current);
+            
             onMessageRef.current?.({
               eventType: payload.eventType as RealtimeEvent<Message>["eventType"],
               new: payload.new as Message,
@@ -74,9 +77,7 @@ export function useRealtime({
           }
         )
         .subscribe((status, err) => {
-          // এটি ব্রাউজার কনসোলে স্ট্যাটাস প্রিন্ট করবে (যেমন: SUBSCRIBED, CHANNEL_ERROR, বা CLOSED)
           console.log("🔔 REALTIME SUBSCRIPTION STATUS:", status);
-          
           if (err) {
             console.error("❌ REALTIME SUBSCRIPTION ERROR:", err);
           }
@@ -103,7 +104,7 @@ export function useRealtime({
         startSubscription();
       } else {
         if (channelRef.current) {
-          console.log("🔌 Removing channel due to logout or missing session.");
+          console.log("🔌 Removing channel due to logout.");
           supabase.removeChannel(channelRef.current);
           channelRef.current = null;
           if (isMounted) setIsConnected(false);

@@ -8,18 +8,12 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  /**
-   * `?c=<id>` deep-link support. Used when landing here from the
-   * dashboard's recent-conversations list so the right thread opens
-   * automatically instead of showing the empty center panel.
-   */
   const deepLinkConvId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -31,13 +25,15 @@ export default function InboxPage() {
     null
   );
 
-  // Fire the deep-link auto-select exactly once per URL — subsequent
-  // list refreshes (realtime, manual refetch) must not snap the user
-  // back to the deep-linked conversation if they've already clicked
-  // elsewhere.
+  // রিয়াক্টের Stale Closure (পুরনো মেমোরি ফাঁদ) এড়াতে useRef দিয়ে একটি লাইভ ট্র্যাকার তৈরি করা হলো
+  const activeConversationRef = useRef<Conversation | null>(null);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
-  // Check WhatsApp connection status on mount
+  // WhatsApp কানেকশন স্ট্যাটাস চেক করা
   useEffect(() => {
     const checkConnection = async () => {
       const supabase = createClient();
@@ -48,8 +44,6 @@ export default function InboxPage() {
 
       if (!user) return;
 
-      // Table is `whatsapp_config` (singular) — the previous "whatsapp_configs"
-      // query always returned no rows, so the banner always showed "not connected".
       const { data } = await supabase
         .from("whatsapp_config")
         .select("status")
@@ -62,29 +56,35 @@ export default function InboxPage() {
     checkConnection();
   }, []);
 
-  // Handle realtime message events
+  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডেল করা
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
+      const currentActiveConv = activeConversationRef.current;
+
+      console.log("🔍 handleMessageEvent received:", event.eventType);
+      console.log("🗣️ Active Conversation ID in UI:", currentActiveConv?.id);
+      console.log("📨 Incoming Message Conversation ID:", newMsg.conversation_id);
 
       if (event.eventType === "INSERT") {
-        // Add to messages if it belongs to active conversation
+        // যদি মেসেজটি বর্তমান ওপেন থাকা চ্যাটের হয়, তবে ইউআই-তে যুক্ত করব
         if (
-          activeConversation &&
-          newMsg.conversation_id === activeConversation.id
+          currentActiveConv &&
+          newMsg.conversation_id === currentActiveConv.id
         ) {
+          console.log("⭐ Message belongs to active conversation. Appending to screen!");
           setMessages((prev) => {
-            // Avoid duplicates
             if (prev.some((m) => m.id === newMsg.id)) return prev;
-            // Replace optimistic message if it exists
             const withoutOptimistic = prev.filter(
               (m) => !m.id.startsWith("temp-")
             );
             return [...withoutOptimistic, newMsg];
           });
+        } else {
+          console.log("ℹ️ Message does not belong to active conversation.");
         }
 
-        // Update conversation list preview
+        // বাম পাশের কনভারসেশন লিস্টের লাস্ট মেসেজ প্রিভিউ এবং আনরিড কাউন্ট আপডেট করা
         setConversations((prev) =>
           prev.map((c) =>
             c.id === newMsg.conversation_id
@@ -93,7 +93,7 @@ export default function InboxPage() {
                   last_message_text: newMsg.content_text ?? "",
                   last_message_at: newMsg.created_at,
                   unread_count:
-                    activeConversation?.id === newMsg.conversation_id
+                    currentActiveConv?.id === newMsg.conversation_id
                       ? 0
                       : c.unread_count + 1,
                 }
@@ -103,16 +103,15 @@ export default function InboxPage() {
       }
 
       if (event.eventType === "UPDATE") {
-        // Update message status
         setMessages((prev) =>
           prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
         );
       }
     },
-    [activeConversation]
+    [] // কোনো ডিপেন্ডেন্সি নেই, ফলে এটি সবসময় লেটেস্ট useRef ভ্যালু অ্যাক্সেস করবে এবং বাসি হবে না
   );
 
-  // Handle realtime conversation events
+  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডেল করা
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -120,6 +119,7 @@ export default function InboxPage() {
       old: Partial<Conversation>;
     }) => {
       const conv = event.new;
+      const currentActiveConv = activeConversationRef.current;
 
       if (event.eventType === "INSERT") {
         setConversations((prev) => [conv, ...prev]);
@@ -130,18 +130,17 @@ export default function InboxPage() {
           prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
         );
 
-        // Update active conversation if it changed
-        if (activeConversation && conv.id === activeConversation.id) {
+        if (currentActiveConv && conv.id === currentActiveConv.id) {
           setActiveConversation((prev) =>
             prev ? { ...prev, ...conv } : prev
           );
         }
       }
     },
-    [activeConversation]
+    [] // কোনো ডিপেন্ডেন্সি নেই
   );
 
-  // Subscribe to realtime
+  // রিয়েল-টাইম হুক সাবস্ক্রিপশন চালু করা
   useRealtime({
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
@@ -152,26 +151,12 @@ export default function InboxPage() {
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
       setConversations(loaded);
-      // Resolve a pending deep-link here rather than in an effect — this
-      // is an event handler, so the setState calls below are allowed by
-      // react-hooks/set-state-in-effect. Runs once per ?c=<id> URL value
-      // via the ref, so realtime refreshes of the list can't snap the
-      // user back to the deep-linked thread after they've navigated.
       if (
         deepLinkConvId &&
         autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
         loaded.length > 0
       ) {
         autoSelectedForDeepLinkRef.current = deepLinkConvId;
-        // If the deep-linked conversation is already the active one
-        // (e.g. because the user clicked it in the list and we
-        // router.replace()'d the URL, which made the ConversationList
-        // refetch and land us back here), do NOT re-apply it. Doing so
-        // would setMessages([]) on a thread whose messages have
-        // already been loaded by MessageThread — and because
-        // conversationId didn't change, MessageThread wouldn't
-        // refetch. The thread would read "No messages yet" until a
-        // full page reload rehydrated state from scratch.
         if (activeConversation?.id === deepLinkConvId) return;
         const match = loaded.find((c) => c.id === deepLinkConvId);
         if (match) {
@@ -186,43 +171,23 @@ export default function InboxPage() {
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
-      // Re-clicking the already-active conversation would clear the
-      // messages array, but the fetch effect in MessageThread only re-runs
-      // when conversationId changes — so messages would stay empty until
-      // the user navigated away and back. Bail out early instead.
       if (activeConversation?.id === conv.id) return;
       setActiveConversation(conv);
       setActiveContact(conv.contact ?? null);
       setMessages([]);
-      // Record the selection on the deep-link ref BEFORE we change the
-      // URL. The router.replace below flips `deepLinkConvId`, which can
-      // in turn cause ConversationList to refetch and eventually call
-      // handleConversationsLoaded again. Without this line, the ref
-      // still points at the previous value, the auto-select block
-      // sees `ref !== deepLinkConvId`, fires a second time, and
-      // clobbers the messages MessageThread just fetched.
       autoSelectedForDeepLinkRef.current = conv.id;
-      // Reflect the selection in the URL so a refresh lands the user
-      // back in the same thread, and so copy-paste links work. Use
-      // replace() to avoid polluting browser history with every click.
       router.replace(`/inbox?c=${conv.id}`, { scroll: false });
     },
     [activeConversation?.id, router]
   );
 
-  // Mobile "back" — deselect the conversation so the list pane comes
-  // back. Also clears the ?c= param so a refresh lands on the list
-  // instead of re-opening the thread the user just backed out of.
   const handleCloseConversation = useCallback(() => {
     setActiveConversation(null);
     setActiveContact(null);
     setMessages([]);
-    // Clearing the ref lets the deep-link auto-selector fire again if
-    // the user later visits /inbox?c=<same-id> — desirable UX.
     autoSelectedForDeepLinkRef.current = null;
     router.replace("/inbox", { scroll: false });
   }, [router]);
-
 
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
     setMessages(loaded);
@@ -249,11 +214,11 @@ export default function InboxPage() {
       setConversations((prev) =>
         prev.map((c) => (c.id === conversationId ? { ...c, status } : c))
       );
-      if (activeConversation?.id === conversationId) {
+      if (activeConversationRef.current?.id === conversationId) {
         setActiveConversation((prev) => (prev ? { ...prev, status } : prev));
       }
     },
-    [activeConversation]
+    []
   );
 
   const handleAssignChange = useCallback(
@@ -265,7 +230,7 @@ export default function InboxPage() {
             : c
         )
       );
-      if (activeConversation?.id === conversationId) {
+      if (activeConversationRef.current?.id === conversationId) {
         setActiveConversation((prev) =>
           prev
             ? { ...prev, assigned_agent_id: assignedAgentId ?? undefined }
@@ -273,20 +238,13 @@ export default function InboxPage() {
         );
       }
     },
-    [activeConversation]
+    []
   );
 
-  // On mobile (<lg) we show a SINGLE pane — either the list or the
-  // thread — rather than cramming both side-by-side. Selecting a
-  // conversation slides the thread in; the thread's back button pops
-  // it back to the list. On lg+ both panes render side-by-side as
-  // before, unchanged.
   const hasActiveConv = !!activeConversation;
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
-      {/* WhatsApp connection banner — in the flex column, not absolute,
-          so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
           <WifiOff className="h-4 w-4 text-amber-400" />
@@ -297,9 +255,6 @@ export default function InboxPage() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left panel: Conversation list.
-            Hidden on mobile when a conversation is selected so the
-            thread can occupy the full width. Always visible on lg+. */}
         <div
           className={cn(
             "flex h-full flex-1 lg:flex-none",
@@ -314,10 +269,6 @@ export default function InboxPage() {
           />
         </div>
 
-        {/* Center panel: Message thread.
-            Hidden on mobile when no conversation is selected so the
-            list can occupy the full width. Always visible on lg+
-            (shows its own empty-state if no thread is picked yet). */}
         <div
           className={cn(
             "flex h-full flex-1 lg:flex",
@@ -337,7 +288,6 @@ export default function InboxPage() {
           />
         </div>
 
-        {/* Right panel: Contact sidebar — desktop only. */}
         <div className="hidden lg:block">
           <ContactSidebar contact={activeContact} />
         </div>
