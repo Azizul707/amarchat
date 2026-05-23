@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// নেক্সট-জেএস ১৬ কনভেনশন অনুযায়ী ফাংশনের নাম 'middleware' থেকে পরিবর্তন করে 'proxy' করা হয়েছে
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -46,9 +45,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // ৩. অথরাইজড এপিআই রুটস (ওয়েবহুক বাদে) সুরক্ষিত করা
+  // ৩. অথরাইজড এপিআই রুটস (ওয়েবহুক এবং এআই রেসপন্ডার বাদে) সুরক্ষিত করা [1]
   if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
-      !request.nextUrl.pathname.includes('/webhook')) {
+      !request.nextUrl.pathname.includes('/webhook') &&
+      !request.nextUrl.pathname.includes('/ai-responder')) { // 👈 এআই রেসপন্ডার রুটকে বাইপাস করার অনুমতি দেওয়া হলো
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

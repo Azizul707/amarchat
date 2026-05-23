@@ -3,10 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { Settings, MessageSquare, Tag, User, Lock, RefreshCw, Loader2, Briefcase, Users, Plus, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Settings, MessageSquare, Tag, User, Lock, RefreshCw, Loader2, Briefcase, Users, Plus, ShieldCheck, ShieldAlert, Zap } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/use-auth';
-// গ্লোবাল ওয়ার্কস্পেস স্টেট হুক ইম্পোর্ট
 import { useWorkspace } from '@/providers/workspace-provider';
 import { toast } from 'sonner';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
@@ -16,8 +15,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
 
-// ট্যাব ভ্যালুতে 'workspace' এবং 'team' ট্যাবটি টাইপ-সেফ উপায়ে যুক্ত করা হয়েছে
-const TAB_VALUES = ['profile', 'workspace', 'team', 'whatsapp', 'templates', 'tags'] as const;
+const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'whatsapp', 'templates', 'tags'] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 function isTabValue(v: string | null): v is TabValue {
@@ -25,7 +23,6 @@ function isTabValue(v: string | null): v is TabValue {
 }
 
 // ==================== WORKSPACE FORM COMPONENT ====================
-// ইউজারদের নিজস্ব ওয়ার্কস্পেস রিনেম করার জন্য ইনলাইন প্রিমিয়াম কার্ড ফর্ম
 function WorkspaceForm() {
   const { workspace, refresh } = useWorkspace();
   const [name, setName] = useState('');
@@ -36,7 +33,6 @@ function WorkspaceForm() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // গ্লোবাল ওয়ার্কস্পেস ডাটা পরিবর্তন হলে স্টেট সিঙ্ক করা
   useEffect(() => {
     if (workspace?.name) {
       setName(workspace.name);
@@ -53,7 +49,6 @@ function WorkspaceForm() {
 
     try {
       setUpdating(true);
-      
       const { error } = await supabase
         .from('workspaces')
         .update({ name: name.trim() })
@@ -65,11 +60,10 @@ function WorkspaceForm() {
       }
 
       toast.success('Workspace name updated successfully!');
-      // গ্লোবাল কনটেক্সট রিফ্রেশ করা যাতে হেডারে নাম সাথে সাথে আপডেট হয়
       await refresh();
     } catch (err) {
       console.error('Workspace Update Error:', err);
-      toast.error('An unexpected error occurred while updating workspace.');
+      toast.error('An unexpected error occurred.');
     } finally {
       setUpdating(false);
     }
@@ -91,7 +85,6 @@ function WorkspaceForm() {
       </div>
 
       <div className="space-y-4 max-w-md">
-        {/* অনন্য ওয়ার্কস্পেস আইডি (শুধুমাত্র দেখার জন্য) */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">Workspace ID</label>
           <input 
@@ -102,7 +95,6 @@ function WorkspaceForm() {
           />
         </div>
 
-        {/* ওয়ার্কস্পেসের নাম ইনপুট ফিল্ড */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">Workspace Name</label>
           <input 
@@ -148,7 +140,6 @@ function TeamForm() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // বর্তমান ওয়ার্কস্পেসের মেম্বারদের ডাটা লোড করার সিকিউরড ফাংশন
   const fetchMembers = useCallback(async () => {
     if (!workspace) return;
     try {
@@ -176,7 +167,6 @@ function TeamForm() {
     fetchMembers();
   }, [fetchMembers]);
 
-  // ইমেইল দিয়ে এজেন্ট ইনভাইট বা কানেক্ট করার লজিক
   const handleAddAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!workspace) return;
@@ -187,7 +177,6 @@ function TeamForm() {
 
     try {
       setAdding(true);
-      // RPC ফাংশন কল করা
       const { data, error } = await supabase.rpc('add_agent_by_email', {
         target_email: email.trim().toLowerCase(),
         target_workspace_id: workspace.id
@@ -201,7 +190,6 @@ function TeamForm() {
       if (data) {
         toast.success(`Agent ${email} successfully connected to your workspace!`);
         setEmail('');
-        // লিস্ট পুনরায় রিফ্রেশ করা
         await fetchMembers();
       }
     } catch (err) {
@@ -214,7 +202,6 @@ function TeamForm() {
 
   return (
     <div className="space-y-6">
-      {/* ১. ইনভাইটেশন কার্ড ফর্ম */}
       <form onSubmit={handleAddAgent} className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 space-y-5">
         <div className="space-y-1">
           <h3 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -255,7 +242,6 @@ function TeamForm() {
         </p>
       </form>
 
-      {/* ২. মেম্বারদের তালিকা টেবিল */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 space-y-4">
         <h3 className="text-base font-semibold text-white">Current Active Agents</h3>
         
@@ -302,6 +288,157 @@ function TeamForm() {
   );
 }
 
+// ==================== AI CONFIGURATION COMPONENT ====================
+function AIForm() {
+  const [apiKey, setApiKey] = useState('');
+  const [prompt, setPrompt] = useState('You are a helpful customer service assistant.');
+  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
+  const [model, setModel] = useState('gpt-4o-mini');
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // ব্যাকএন্ড এপিআই রুটের মাধ্যমে এআই কনফিগ লোড করা (নিরাপদ ও এনক্রিপশন-সেফ)
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch('/api/settings/ai');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.apiKey) setApiKey(data.apiKey);
+          if (data.prompt) setPrompt(data.prompt);
+          if (data.baseUrl) setBaseUrl(data.baseUrl);
+          if (data.model) setModel(data.model);
+        }
+      } catch (err) {
+        console.error('Failed to load AI config:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadConfig();
+  }, []);
+
+  // এআই কনফিগারেশন ব্যাকএন্ড সার্ভারের মাধ্যমে সুরক্ষিতভাবে সেভ করা
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      const res = await fetch('/api/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: apiKey.trim(),
+          prompt: prompt.trim(),
+          baseUrl: baseUrl.trim(),
+          model: model.trim(),
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+
+      toast.success('AI configurations updated successfully!');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Failed to update AI configurations: ${err.message || err}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 flex justify-center py-12">
+        <Loader2 className="animate-spin text-indigo-500 h-6 w-6" />
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 space-y-6">
+      <div className="space-y-1">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Zap className="h-5 w-5 text-indigo-400 animate-pulse" />
+          <span>Universal AI Chatbot Configuration</span>
+        </h3>
+        <p className="text-sm text-slate-400">Configure your chatbot API endpoints. Supports OpenAI, OpenRouter, DeepSeek, or any custom provider.</p>
+      </div>
+
+      <div className="space-y-4 max-w-xl">
+        {/* ১. এআই এপিআই কি ইনপুট */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-300">AI API Key (BYOK)</label>
+          <input 
+            type="password" 
+            value={apiKey} 
+            onChange={(e) => setApiKey(e.target.value)} 
+            className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 transition-colors" 
+            placeholder="OpenAI, OpenRouter, or DeepSeek API Key"
+          />
+          <p className="text-[10px] text-slate-500 font-sans leading-normal">
+            📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে।
+          </p>
+        </div>
+
+        {/* ২. এআই প্রোভাইডার বেস ইউআরএল ইনপুট */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-300">API Base URL (Endpoint Path)</label>
+          <input 
+            type="text" 
+            value={baseUrl} 
+            onChange={(e) => setBaseUrl(e.target.value)} 
+            className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 transition-colors font-mono" 
+            placeholder="e.g., https://api.openai.com/v1"
+          />
+          <p className="text-[10px] text-slate-500 font-sans leading-normal">
+            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` এবং OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন।
+          </p>
+        </div>
+
+        {/* ৩. এআই মডেল নাম ইনপুট */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-300">AI Model Name</label>
+          <input 
+            type="text" 
+            value={model} 
+            onChange={(e) => setModel(e.target.value)} 
+            className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 transition-colors font-mono" 
+            placeholder="e.g., gpt-4o-mini or google/gemini-2.5-flash"
+          />
+          <p className="text-[10px] text-slate-500 font-sans leading-normal">
+            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`)।
+          </p>
+        </div>
+
+        {/* ৪. এআই প্রম্পট নির্দেশনা ইনপুট */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-300">AI System Instructions (Prompt)</label>
+          <textarea 
+            rows={5}
+            value={prompt} 
+            onChange={(e) => setPrompt(e.target.value)} 
+            className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none leading-relaxed" 
+            placeholder="You are a helpful customer service assistant for my business..."
+          />
+        </div>
+      </div>
+
+      <div className="pt-2">
+        <button 
+          type="submit" 
+          disabled={saving}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer"
+        >
+          {saving ? 'Saving...' : 'Save AI Configurations'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ==================== LOCKED TAB CARD COMPONENT ====================
 function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefresh: () => void; checking: boolean }) {
   return (
@@ -329,7 +466,7 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <a 
-            href="https://t.me/your_support_link"
+            href="https://t.me/amarchatsupport"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-black bg-indigo-500 hover:bg-indigo-400 rounded-lg transition-colors flex items-center justify-center gap-1.5"
@@ -361,7 +498,7 @@ export default function SettingsPage() {
   const { profile: cachedProfile } = useAuth(); 
   const [localProfile, setLocalProfile] = useState<{ is_approved: boolean; subscription_expires_at: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
-  const [mounted, setMounted] = useState(false); // সার্ভার এবং ক্লায়েন্ট সিঙ্ক নিশ্চিত করার স্টেট
+  const [mounted, setMounted] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -437,14 +574,13 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Settings</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Manage your profile, workspace settings, WhatsApp® integration, message templates, and
-          tags.
+          Manage your profile, team members, WhatsApp® integration, AI chatbots, and message templates.
         </p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => onChange(v as TabValue)}>
         <TabsList className="bg-slate-900 border border-slate-700 flex flex-wrap">
-          {/* প্রোফাইল ট্যাব (সর্বদা আনলকড) */}
+          {/* Profile Tab */}
           <TabsTrigger
             value="profile"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -453,7 +589,7 @@ export default function SettingsPage() {
             Profile
           </TabsTrigger>
 
-          {/* নতুন ওয়ার্কস্পেস সেটিংস ট্যাব (সর্বদা আনলকড, যাতে অ্যাকাউন্ট পেন্ডিং থাকা অবস্থায়ও কোম্পানি সেটআপ করা যায়) */}
+          {/* Workspace Tab */}
           <TabsTrigger
             value="workspace"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -462,7 +598,7 @@ export default function SettingsPage() {
             Workspace
           </TabsTrigger>
 
-          {/* টিম ট্যাব (এজেন্ট ও মেম্বার কানেক্ট করার জন্য নতুন যোগ করা হয়েছে) */}
+          {/* Team Tab */}
           <TabsTrigger
             value="team"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -471,7 +607,16 @@ export default function SettingsPage() {
             Team
           </TabsTrigger>
 
-          {/* হোয়াটসঅ্যাপ সেটিংস ট্যাব */}
+          {/* New AI Chatbot Tab */}
+          <TabsTrigger
+            value="ai"
+            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+          >
+            <Zap className="size-4" />
+            AI Chatbot
+          </TabsTrigger>
+
+          {/* WhatsApp Settings Tab */}
           <TabsTrigger
             value="whatsapp"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -480,7 +625,7 @@ export default function SettingsPage() {
             WhatsApp Config
           </TabsTrigger>
 
-          {/* ব্রডকাস্ট টেমপ্লেট ট্যাব */}
+          {/* Message Templates Tab */}
           <TabsTrigger
             value="templates"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -489,7 +634,7 @@ export default function SettingsPage() {
             Templates
           </TabsTrigger>
 
-          {/* ট্যাগ ম্যানেজার ট্যাব */}
+          {/* Tag Manager Tab */}
           <TabsTrigger
             value="tags"
             className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
@@ -506,19 +651,23 @@ export default function SettingsPage() {
           <SessionsCard />
         </TabsContent>
 
-        {/* NEW WORKSPACE TAB CONTENT */}
+        {/* WORKSPACE TAB CONTENT */}
         <TabsContent value="workspace" className="space-y-6">
           <WorkspaceForm />
         </TabsContent>
 
-        {/* NEW TEAM TAB CONTENT */}
+        {/* TEAM TAB CONTENT */}
         <TabsContent value="team" className="space-y-6">
           <TeamForm />
         </TabsContent>
 
+        {/* NEW AI TAB CONTENT */}
+        <TabsContent value="ai" className="space-y-6">
+          <AIForm />
+        </TabsContent>
+
         {/* WHATSAPP TAB CONTENT */}
         <TabsContent value="whatsapp">
-          {/* মাউন্ট হওয়া এবং ডাটা লোড হওয়ার আগ পর্যন্ত উভয় এন্ডে একই লোডার দেখাবে, যা Hydration Mismatch রোধ করবে */}
           {!mounted || checkingStatus ? (
             <div className="flex h-48 items-center justify-center">
               <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />

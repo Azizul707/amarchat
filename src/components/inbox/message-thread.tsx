@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-// গ্লোবাল ওয়ার্কস্পেস স্টেট হুক ইম্পোর্ট
 import { useWorkspace } from "@/providers/workspace-provider";
 import { cn } from "@/lib/utils";
 import type {
@@ -22,6 +21,8 @@ import {
   Check,
   Clock,
   ArrowLeft,
+  Zap,
+  Loader2,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -116,15 +117,16 @@ export function MessageThread({
   onBack,
 }: MessageThreadProps) {
   const { user } = useAuth();
-  const { workspace } = useWorkspace(); // 👈 গ্লোবাল ওয়ার্কস্পেস স্টেট মেমোরি থেকে ফেচ
+  const { workspace } = useWorkspace();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const [togglingAi, setTogglingAi] = useState(false);
 
-  // Profiles এর কুয়েরিতে রিয়েল-টাইম active 'workspace_id' ফিল্টারিং সেট করা হয়েছে [1]
+  // Profiles এর কুয়েরিতে রিয়েল-টাইম active 'workspace_id' ফিল্টারিং
   useEffect(() => {
     if (!workspace?.id) {
       setProfiles([]);
@@ -135,7 +137,7 @@ export function MessageThread({
     supabase
       .from("profiles")
       .select("*")
-      .eq("workspace_id", workspace.id) // 👈 শুধুমাত্র কারেন্ট ওয়ার্কস্পেসের এজেন্টদের নিয়ে আসবে
+      .eq("workspace_id", workspace.id)
       .order("full_name")
       .then(({ data, error }) => {
         if (cancelled) return;
@@ -148,7 +150,7 @@ export function MessageThread({
     return () => {
       cancelled = true;
     };
-  }, [workspace?.id]); // 👈 ওয়ার্কস্পেস পরিবর্তন হলে যেন অটো রিলোড হয়
+  }, [workspace?.id]);
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -177,13 +179,7 @@ export function MessageThread({
     return { expired, remaining };
   }, [messages]);
 
-  // Store latest callback in a ref so fetchMessages doesn't need to
-  // depend on `onMessagesLoaded` — otherwise parent re-renders cause
-  // fetchMessages to change → useEffect re-fires → refetch → realtime
-  // UPDATE on conversations.unread_count → parent re-renders → LOOP.
-  // The ref is written inside an effect so the mutation doesn't happen
-  // during render (React 19 refs rule); consumers only read `.current`
-  // inside the async fetch completion, which runs after the render.
+  // Store latest callback in a ref so fetchMessages doesn't need to depend on `onMessagesLoaded`
   const onMessagesLoadedRef = useRef(onMessagesLoaded);
   useEffect(() => {
     onMessagesLoadedRef.current = onMessagesLoaded;
@@ -192,10 +188,7 @@ export function MessageThread({
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
-  // Fetch messages whenever the selected conversation changes. Kept
-  // separate from the unread-reset effect so that incoming messages
-  // arriving while the thread is open don't trigger a full refetch —
-  // they only flip hasUnread, which only the reset effect listens to.
+  // Fetch messages whenever the selected conversation changes.
   useEffect(() => {
     if (!conversationId) return;
 
@@ -227,10 +220,7 @@ export function MessageThread({
     };
   }, [conversationId]);
 
-  // Reactions: fetch + realtime per conversation. Subscribing here (not at
-  // the page level) keeps the channel scoped to the visible conversation,
-  // matching the message fetch effect above and avoiding cross-conversation
-  // chatter on a busy inbox.
+  // Reactions: fetch + realtime per conversation.
   useEffect(() => {
     if (!conversationId) {
       setReactions([]);
@@ -266,8 +256,6 @@ export function MessageThread({
           const row = payload.new as MessageReaction;
           setReactions((prev) => {
             if (prev.some((r) => r.id === row.id)) return prev;
-            // Swap any matching optimistic temp row for the real one so
-            // the pill doesn't double up after a successful POST.
             const tempIdx = prev.findIndex(
               (r) =>
                 r.id.startsWith("temp-") &&
@@ -319,21 +307,12 @@ export function MessageThread({
     };
   }, [conversationId]);
 
-  // Clear any in-progress reply draft when the active conversation changes —
-  // a quote pulled from conversation A shouldn't bleed into conversation B.
+  // Clear any reply draft on conversation change
   useEffect(() => {
     setReplyTo(null);
   }, [conversationId]);
 
-  // Reset the server-side unread_count to 0 whenever an unread count
-  // surfaces on the active conversation — covers both (a) opening a
-  // conversation that had unread messages and (b) new messages arriving
-  // while the user is already viewing the thread (webhook server-bumps
-  // unread_count to N+1; the realtime UPDATE propagates it into the
-  // client, which re-runs this effect and flips it back to 0).
-  //
-  // Guarding on hasUnread prevents the eq-update loop: once unread_count
-  // is 0 the condition is false, so no further UPDATE is issued.
+  // Reset unread_count to 0
   useEffect(() => {
     if (!conversationId || !hasUnread) return;
     const supabase = createClient();
@@ -346,7 +325,7 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current;
@@ -360,7 +339,6 @@ export function MessageThread({
 
       const tempId = `temp-${Date.now()}`;
 
-      // Optimistic update — shows the message immediately with "sending" status
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
@@ -392,14 +370,10 @@ export function MessageThread({
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send message:", reason);
           toast.error(`Failed to send: ${reason}`);
-          // Mark the optimistic bubble as failed so the user sees what happened
           onUpdateMessage(tempId, { status: "failed" });
           return;
         }
 
-        // Success — the realtime INSERT event will replace the temp bubble
-        // with the real DB row. If realtime hasn't arrived yet, at least
-        // flip status to 'sent' so the UI stops showing "sending".
         onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
         console.error("Failed to send message:", err);
@@ -483,15 +457,12 @@ export function MessageThread({
     [conversation, onNewMessage, onUpdateMessage],
   );
 
-  // Build a quick id → Message map so reply quotes can be rendered without
-  // an extra fetch — the thread already holds the full conversation.
   const messagesById = useMemo(() => {
     const map = new Map<string, Message>();
     for (const m of messages) map.set(m.id, m);
     return map;
   }, [messages]);
 
-  // Bucket reactions by their target message_id for O(1) per-bubble lookup.
   const reactionsByMessageId = useMemo(() => {
     const map = new Map<string, MessageReaction[]>();
     for (const r of reactions) {
@@ -504,8 +475,6 @@ export function MessageThread({
 
   const contactDisplayName = contact?.name || contact?.phone || "Customer";
 
-  // Author label for a quoted message: "You" when we sent the parent,
-  // contact name when the customer sent it.
   const authorLabelFor = useCallback(
     (m: Message): string => {
       const isAgentMsg =
@@ -526,10 +495,6 @@ export function MessageThread({
     [authorLabelFor],
   );
 
-  // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
-  // The "toggle" semantic (pill click) is computed at the call site where the
-  // current reactions for the bubble are already in scope — keeps this
-  // function dependency-free w.r.t. the reaction list.
   const postReaction = useCallback(
     async (messageId: string, emoji: string) => {
       if (!user?.id || !conversation) {
@@ -545,8 +510,6 @@ export function MessageThread({
       const userId = user.id;
       let snapshot: MessageReaction[] = [];
 
-      // Functional updater — captures the freshest reactions list, never a
-      // stale closure. Snapshot stored for rollback on POST failure.
       setReactions((prev) => {
         snapshot = prev;
         const own = prev.find(
@@ -611,7 +574,34 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
-  // Empty state
+  // ম্যানুয়ালি এআই অ্যাসিস্ট্যান্ট অন/অফ করার রিয়েল-টাইম ডাটাবেস হ্যান্ডলার (null সেফগার্ড সহ) [1.1.5, 1.2.7]
+  const isAIActive = conversation ? !!(conversation as any).ai_active : false;
+  
+  const handleToggleAI = async () => {
+    if (!conversation) return;
+    try {
+      setTogglingAi(true);
+      const nextValue = !isAIActive;
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ ai_active: nextValue })
+        .eq("id", conversation.id);
+
+      if (error) {
+        console.error("Failed to toggle AI:", error);
+        toast.error("Failed to update AI state");
+        return;
+      }
+      toast.success(`AI Chatbot is now ${nextValue ? "enabled" : "disabled"} for this conversation!`);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTogglingAi(false);
+    }
+  };
+
+  // Empty state (বাটনের আগেই চেক করার ফলে এখন আর কোনো null-pointer এরর আসবে না) [1.1.5]
   if (!conversation || !contact) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center bg-slate-950">
@@ -644,8 +634,6 @@ export function MessageThread({
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 bg-slate-900 px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          {/* Back-to-list button — mobile only. Hidden on lg+ where the
-              conversation list is always visible next to the thread. */}
           {onBack && (
             <button
               type="button"
@@ -663,8 +651,6 @@ export function MessageThread({
             <h2 className="truncate text-sm font-semibold text-white">{displayName}</h2>
             <p className="truncate text-xs text-slate-400">{contact.phone}</p>
           </div>
-          {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. */}
           <Badge
             variant="outline"
             className={cn(
@@ -678,6 +664,26 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* নতুন এআই অ্যাসিস্ট্যান্ট কন্ট্রোল বাটন (১০০% ম্যানুয়াল ও সেফগার্ড সহ) [1.2.7, 1.2.8] */}
+          <button
+            type="button"
+            disabled={togglingAi}
+            onClick={handleToggleAI}
+            className={cn(
+              "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md border transition-all cursor-pointer",
+              isAIActive 
+                ? "bg-violet-600/10 border-violet-500/30 text-violet-400 font-semibold" 
+                : "bg-transparent border-slate-800 text-slate-400 hover:bg-slate-800"
+            )}
+          >
+            {togglingAi ? (
+              <Loader2 className="h-3 w-3 animate-spin text-violet-500" />
+            ) : (
+              <Zap className={cn("h-3 w-3", isAIActive && "fill-violet-450/20")} />
+            )}
+            <span>{isAIActive ? "AI: On" : "AI: Off"}</span>
+          </button>
+
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
@@ -703,7 +709,7 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Assign dropdown (গ্লোবাল লিস্টের বদলে এখন শুধু নিজের ওয়ার্কস্পেসের এজেন্টদের মেম্বার লিস্ট দেখাবে) */}
+          {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
@@ -796,8 +802,6 @@ export function MessageThread({
                         }
                       : null;
                     const msgReactions = reactionsByMessageId.get(msg.id);
-                    // Toggle is computed at the call site — `msgReactions`
-                    // and `user?.id` are already in scope, no extra hook.
                     const handlePillToggle = (emoji: string) => {
                       const own = msgReactions?.find(
                         (r) =>
