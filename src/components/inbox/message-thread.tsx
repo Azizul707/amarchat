@@ -316,17 +316,12 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // ====================================================================
-  // অটো-স্ক্রল লজিক (Immediate + Delayed ল্যাগ ফিক্স করা হয়েছে) [1.2.7, 1.2.8]
-  // ====================================================================
+  // অটো-স্ক্রল লজিক
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current;
-      
-      // ১. তাৎক্ষণিক স্ক্রল করার চেষ্টা
       el.scrollTop = el.scrollHeight;
 
-      // ২. ৫০ মিলি-সেকেন্ড ডিলে দিয়ে ফোর্সড স্ক্রল (যাতে ব্রাউজার নোড রেন্ডার শেষ করে স্ক্রল করতে পারে)
       const timer = setTimeout(() => {
         el.scrollTop = el.scrollHeight;
       }, 50);
@@ -475,94 +470,14 @@ export function MessageThread({
     return map;
   }, [reactions]);
 
-  const contactDisplayName = contact?.name || contact?.phone || "Customer";
-
-  const authorLabelFor = useCallback(
-    (m: Message): string => {
-      const isAgentMsg =
-        m.sender_type === "agent" || m.sender_type === "bot";
-      return isAgentMsg ? "You" : contactDisplayName;
-    },
-    [contactDisplayName],
-  );
-
-  const handleStartReply = useCallback(
-    (msg: Message) => {
-      setReplyTo({
-        id: msg.id,
-        authorLabel: authorLabelFor(msg),
-        preview: buildReplyPreview(msg),
-      });
-    },
-    [authorLabelFor],
-  );
-
-  const postReaction = useCallback(
-    async (messageId: string, emoji: string) => {
-      if (!user?.id || !conversation) {
-        console.warn("[reactions] missing user or conversation");
-        return;
-      }
-      if (messageId.startsWith("temp-")) {
-        toast.error("Wait for the message to finish sending");
-        return;
-      }
-
-      const convId = conversation.id;
-      const userId = user.id;
-      let snapshot: MessageReaction[] = [];
-
-      setReactions((prev) => {
-        snapshot = prev;
-        const own = prev.find(
-          (r) =>
-            r.message_id === messageId &&
-            r.actor_type === "agent" &&
-            r.actor_id === userId,
-        );
-        if (emoji === "") return own ? prev.filter((r) => r !== own) : prev;
-        if (own) return prev.map((r) => (r === own ? { ...own, emoji } : r));
-        return [
-          ...prev,
-          {
-            id: `temp-${Date.now()}`,
-            message_id: messageId,
-            conversation_id: convId,
-            actor_type: "agent",
-            actor_id: userId,
-            emoji,
-            created_at: new Date().toISOString(),
-          },
-        ];
-      });
-
-      try {
-        const res = await fetch("/api/whatsapp/react", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message_id: messageId, emoji }),
-        });
-        if (!res.ok) {
-          const payload = await res.json().catch(() => ({}));
-          throw new Error(payload?.error || `HTTP ${res.status}`);
-        }
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Reaction failed: ${reason}`);
-        setReactions(snapshot);
-      }
-    },
-    [conversation, user?.id],
-  );
-
   const handleAssignChange = useCallback(
-    async (agentId: string | null) => {
+    async (assignedAgentId: string | null) => {
       if (!conversation) return;
 
       const supabase = createClient();
       const { error } = await supabase
         .from("conversations")
-        .update({ assigned_agent_id: agentId })
+        .update({ assigned_agent_id: assignedAgentId })
         .eq("id", conversation.id);
 
       if (error) {
@@ -571,7 +486,7 @@ export function MessageThread({
         return;
       }
 
-      onAssignChange(conversation.id, agentId);
+      onAssignChange(conversation.id, assignedAgentId);
     },
     [conversation, onAssignChange],
   );
@@ -604,6 +519,28 @@ export function MessageThread({
     }
   };
 
+  // ====================================================================
+  // EMPTY STATE লজিক (নিশ্চিত করে যে এর নিচের সব কোডে contact এবং conversation থাকবেই)
+  // ====================================================================
+  if (!conversation || !contact) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center bg-slate-950">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-800">
+          <MessageSquare className="h-8 w-8 text-slate-600" />
+        </div>
+        <h3 className="mt-4 text-sm font-medium text-slate-400">
+          Select a conversation
+        </h3>
+        <p className="mt-1 text-xs text-slate-600">
+          Choose a conversation from the left to start messaging
+        </p>
+      </div>
+    );
+  }
+
+  // ====================================================================
+  // শুধুমাত্র তখনই রান হবে যখন contact এবং conversation নাল নয়
+  // ====================================================================
   const displayName = contact.name || contact.phone;
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
@@ -614,6 +551,22 @@ export function MessageThread({
   const assignLabel = assignedAgentId
     ? (currentAssignee?.full_name ?? "Assigned")
     : "Assign";
+
+  const contactDisplayName = contact.name || contact.phone || "Customer";
+
+  const authorLabelFor = (m: Message): string => {
+    const isAgentMsg =
+      m.sender_type === "agent" || m.sender_type === "bot";
+    return isAgentMsg ? "You" : contactDisplayName;
+  };
+
+  const handleStartReply = (msg: Message) => {
+    setReplyTo({
+      id: msg.id,
+      authorLabel: authorLabelFor(msg),
+      preview: buildReplyPreview(msg),
+    });
+  };
 
   return (
     <div className="flex flex-1 flex-col bg-slate-950">
