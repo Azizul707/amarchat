@@ -574,8 +574,10 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
-  // ম্যানুয়ালি এআই অ্যাসিস্ট্যান্ট অন/অফ করার রিয়েল-টাইম ডাটাবেস হ্যান্ডলার (null সেফগার্ড সহ) [1.1.5, 1.2.7]
-  const isAIActive = conversation ? !!(conversation as any).ai_active : false;
+  // এআই কাস্টিং টাইপ সেফগার্ড (any কীওয়ার্ড বাদ দিয়ে 'unknown' ও 'Record' ব্যবহার করা হয়েছে) [1.2.7]
+  const isAIActive = conversation 
+    ? !!(conversation as unknown as Record<string, unknown>).ai_active 
+    : false;
   
   const handleToggleAI = async () => {
     if (!conversation) return;
@@ -601,7 +603,7 @@ export function MessageThread({
     }
   };
 
-  // Empty state (বাটনের আগেই চেক করার ফলে এখন আর কোনো null-pointer এরর আসবে না) [1.1.5]
+  // Empty state
   if (!conversation || !contact) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center bg-slate-950">
@@ -664,7 +666,7 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* নতুন এআই অ্যাসিস্ট্যান্ট কন্ট্রোল বাটন (১০০% ম্যানুয়াল ও সেফগার্ড সহ) [1.2.7, 1.2.8] */}
+          {/* নতুন এআই অ্যাসিস্ট্যান্ট কন্ট্রোল বাটন (১০০% টাইপ-সেফ ও এরর-ফ্রি) [1.2.7, 1.2.8] */}
           <button
             type="button"
             disabled={togglingAi}

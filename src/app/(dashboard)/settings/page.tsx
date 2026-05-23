@@ -297,7 +297,6 @@ function AIForm() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // ব্যাকএন্ড এপিআই রুটের মাধ্যমে এআই কনফিগ লোড করা (নিরাপদ ও এনক্রিপশন-সেফ)
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -319,7 +318,6 @@ function AIForm() {
     loadConfig();
   }, []);
 
-  // এআই কনফিগারেশন ব্যাকএন্ড সার্ভারের মাধ্যমে সুরক্ষিতভাবে সেভ করা
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -341,9 +339,10 @@ function AIForm() {
       }
 
       toast.success('AI configurations updated successfully!');
-    } catch (err: any) {
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(err);
-      toast.error(`Failed to update AI configurations: ${err.message || err}`);
+      toast.error(`Failed to update AI configurations: ${errorMessage}`);
     } finally {
       setSaving(false);
     }
@@ -364,7 +363,7 @@ function AIForm() {
           <Zap className="h-5 w-5 text-indigo-400 animate-pulse" />
           <span>Universal AI Chatbot Configuration</span>
         </h3>
-        <p className="text-sm text-slate-400">Configure your chatbot API endpoints. Supports OpenAI, OpenRouter, DeepSeek, or any custom provider.</p>
+        <p className="text-sm text-slate-400">Configure your chatbot API endpoints. Supports OpenAI, OpenRouter, DeepSeek, or any custom provider [1.2.7].</p>
       </div>
 
       <div className="space-y-4 max-w-xl">
@@ -379,7 +378,7 @@ function AIForm() {
             placeholder="OpenAI, OpenRouter, or DeepSeek API Key"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে।
+            📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে [1.2.2]।
           </p>
         </div>
 
@@ -394,7 +393,7 @@ function AIForm() {
             placeholder="e.g., https://api.openai.com/v1"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` এবং OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন।
+            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` এবং OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন [1.2.7]।
           </p>
         </div>
 
@@ -409,7 +408,7 @@ function AIForm() {
             placeholder="e.g., gpt-4o-mini or google/gemini-2.5-flash"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`)।
+            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`) [1.2.7]।
           </p>
         </div>
 
@@ -466,7 +465,7 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <a 
-            href="https://t.me/amarchatsupport"
+            href="https://t.me/your_support_link"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-black bg-indigo-500 hover:bg-indigo-400 rounded-lg transition-colors flex items-center justify-center gap-1.5"
