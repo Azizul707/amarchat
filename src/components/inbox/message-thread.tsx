@@ -33,7 +33,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import { MessageComposer } from "./message-composer";
@@ -518,6 +517,65 @@ export function MessageThread({
       setTogglingAi(false);
     }
   };
+
+  // রিয়্যাকশন (emoji) দেওয়ার জন্য ওরিজিনাল postReaction মেথডটি এখানে ওপরে ডিফাইন করা হলো (Rules of Hooks মেনে) [1.2.7]
+  const postReaction = useCallback(
+    async (messageId: string, emoji: string) => {
+      if (!user?.id || !conversation) {
+        console.warn("[reactions] missing user or conversation");
+        return;
+      }
+      if (messageId.startsWith("temp-")) {
+        toast.error("Wait for the message to finish sending");
+        return;
+      }
+
+      const convId = conversation.id;
+      const userId = user.id;
+      let snapshot: MessageReaction[] = [];
+
+      setReactions((prev) => {
+        snapshot = prev;
+        const own = prev.find(
+          (r) =>
+            r.message_id === messageId &&
+            r.actor_type === "agent" &&
+            r.actor_id === userId,
+        );
+        if (emoji === "") return own ? prev.filter((r) => r !== own) : prev;
+        if (own) return prev.map((r) => (r === own ? { ...own, emoji } : r));
+        return [
+          ...prev,
+          {
+            id: `temp-${Date.now()}`,
+            message_id: messageId,
+            conversation_id: convId,
+            actor_type: "agent",
+            actor_id: userId,
+            emoji,
+            created_at: new Date().toISOString(),
+          },
+        ];
+      });
+
+      try {
+        const res = await fetch("/api/whatsapp/react", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message_id: messageId, emoji }),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload?.error || `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : "network error";
+        toast.error(`Reaction failed: ${reason}`);
+        setReactions(snapshot);
+      }
+    },
+    [conversation, user?.id],
+  );
 
   // ====================================================================
   // EMPTY STATE লজিক (নিশ্চিত করে যে এর নিচের সব কোডে contact এবং conversation থাকবেই)
