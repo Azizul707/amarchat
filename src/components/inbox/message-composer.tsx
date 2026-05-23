@@ -51,7 +51,7 @@ export function MessageComposer({
     el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
   }, []);
 
-  // HTML5 Canvas ব্যবহার করে মিলি-সেকেন্ডে ইমেজ সাইজ রিডুস করার হেল্পার ফাংশন [1.2.6]
+  // HTML5 Canvas ব্যবহার করে ইমেজ কম্প্রেশন
   const compressImage = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -61,7 +61,7 @@ export function MessageComposer({
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const max_size = 1200; // বড় ছবির রেজোলিউশন লিমিট করা
+          const max_size = 1200;
           let width = img.width;
           let height = img.height;
 
@@ -84,32 +84,29 @@ export function MessageComposer({
 
           canvas.toBlob((blob) => {
             resolve(blob || file);
-          }, 'image/jpeg', 0.85); // ৮৫% কোয়ালিটি রেখে ফাইল সাইজ নাটকীয়ভাবে কমানো
+          }, 'image/jpeg', 0.85);
         };
       };
     });
   };
 
-  // ফাইল আপলোড ও মেটা এপিআই-তে সেন্ড করার রিয়েল-টাইম ড্রাইভার ফাংশন [1.2.3]
+  // সুপাবেসে ফাইল আপলোড ও মেটা এপিআই কল ড্রাইভার
   const uploadAndSend = async (fileToUpload: File | Blob, messageType: 'image' | 'video' | 'audio' | 'document', originalName?: string) => {
     try {
       setUploading(true);
       let finalFile = fileToUpload;
       let finalName = originalName || (fileToUpload instanceof File ? fileToUpload.name : `voice-note-${Date.now()}.ogg`);
 
-      // ১. যদি ছবি হয়, তবে ক্লায়েন্ট সাইডে তাৎক্ষণিকভাবে কম্প্রেস করা [1.2.6]
       if (messageType === 'image' && fileToUpload instanceof File) {
-        
+        toast.info("Compressing image for instant delivery...");
         const compressedBlob = await compressImage(fileToUpload);
         finalFile = new File([compressedBlob], finalName, { type: 'image/jpeg' });
       }
 
-      // ২. ইউনিক ফাইল পাথ ডিফাইন করা
       const fileExtension = finalName.split('.').pop() || 'bin';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExtension}`;
       const filePath = `${conversationId}/${fileName}`;
 
-      // ৩. সুপাবেস স্টোরেজে আপলোড [1.2.3]
       const supabase = createClient();
       const { error: uploadError } = await supabase.storage
         .from('whatsapp-media')
@@ -124,12 +121,10 @@ export function MessageComposer({
         return;
       }
 
-      // ৪. ফাইলের পাবলিক লিংক সংগ্রহ করা [1.2.3]
       const { data: { publicUrl } } = supabase.storage
         .from('whatsapp-media')
         .getPublicUrl(filePath);
 
-      // ৫. ব্যাকএন্ড মেটা সেন্ড এপিআই কল [1.2.3]
       const res = await fetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,7 +192,6 @@ export function MessageComposer({
     [adjustHeight]
   );
 
-  // পেপারক্লিপ বাটন থেকে ফাইল পরিবর্তনের হ্যান্ডলার [1.2.3]
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -214,7 +208,6 @@ export function MessageComposer({
     await uploadAndSend(file, messageType);
   };
 
-  // ভয়েস রেকর্ডিং শুরু করার ফাংশন [1.2.8]
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -230,7 +223,7 @@ export function MessageComposer({
       };
 
       recorder.onstop = async () => {
-        if (!shouldSendAudioRef.current) return; // বাতিল করা হলে সেন্ড হবে না
+        if (!shouldSendAudioRef.current) return;
         
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg; codecs=opus' });
         const audioFile = new File([audioBlob], `voice-note-${Date.now()}.ogg`, { type: 'audio/ogg' });
@@ -247,7 +240,6 @@ export function MessageComposer({
     }
   };
 
-  // ভয়েস রেকর্ডিং স্টপ এবং অটো-সেন্ড করার ফাংশন [1.2.8]
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -256,10 +248,9 @@ export function MessageComposer({
     }
   };
 
-  // ভয়েস রেকর্ডিং বাতিল (Cancel) করার ফাংশন [1.2.8]
   const cancelRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      shouldSendAudioRef.current = false; // সেন্ড ফ্ল্যাগ ডিজেবল করা
+      shouldSendAudioRef.current = false;
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       setIsRecording(false);
@@ -317,7 +308,7 @@ export function MessageComposer({
           <LayoutTemplate className="h-4 w-4" />
         </Button>
 
-        {/* পেপারক্লিপ বাটন (ডিজাইন একদম একই রাখা হয়েছে) */}
+        {/* পেপারক্লিপ বাটন */}
         <Button
           variant="ghost"
           size="sm"
@@ -334,12 +325,16 @@ export function MessageComposer({
           )}
         </Button>
 
-        {/* অডিও রেকর্ডার বাটন প্যানেল (রেকর্ডিং সচল হলে ডাইনামিক লাইভ প্যানেল দেখাবে) */}
+        {/* অডিও রেকর্ডার বাটন প্যানেল (লুসিড আইকনগুলোর RLS প্রপ এরর ফিক্স করা হয়েছে) [1.2.7, 1.2.8] */}
         {isRecording ? (
           <div className="flex h-9 items-center gap-3 px-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 animate-pulse shrink-0">
-            <Square className="h-4 w-4 text-red-500 cursor-pointer shrink-0" onClick={stopRecording} title="Stop and Send" />
+            <span className="cursor-pointer shrink-0" onClick={stopRecording} title="Stop and Send">
+              <Square className="h-4 w-4 text-red-500" />
+            </span>
             <span className="text-[11px] font-semibold select-none">Rec...</span>
-            <Trash2 className="h-4 w-4 text-slate-400 hover:text-white cursor-pointer shrink-0" onClick={cancelRecording} title="Discard Note" />
+            <span className="cursor-pointer shrink-0" onClick={cancelRecording} title="Discard Note">
+              <Trash2 className="h-4 w-4 text-slate-400 hover:text-white" />
+            </span>
           </div>
         ) : (
           <Button
