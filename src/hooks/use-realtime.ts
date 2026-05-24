@@ -43,7 +43,10 @@ export function useRealtime({
     let unsubscribeAuth: (() => void) | null = null;
 
     const startSubscription = () => {
-      if (channelRef.current) return;
+      if (channelRef.current) {
+        console.log("ℹ️ Realtime channel already exists. Skipping recreation.");
+        return;
+      }
 
       console.log("🚀 Attempting to subscribe to channel:", channelName);
 
@@ -54,9 +57,6 @@ export function useRealtime({
           { event: "*", schema: "public", table: "messages" },
           (payload) => {
             console.log("📨 REALTIME NEW MESSAGE RECEIVED:", payload);
-            // ডাবল চেক করছি ফাংশনটি ঠিকঠাক ক্লায়েন্ট থেকে এসে পৌঁছেছে কি না
-            console.log("👉 Is onMessageRef.current defined?", !!onMessageRef.current);
-            
             onMessageRef.current?.({
               eventType: payload.eventType as RealtimeEvent<Message>["eventType"],
               new: payload.new as Message,
@@ -89,25 +89,24 @@ export function useRealtime({
       channelRef.current = channel;
     };
 
+    // Fast check for active session, start channel if valid
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session && isMounted) {
-        console.log("🔑 Session found. Starting subscription...");
         startSubscription();
-      } else {
-        console.log("⚠️ No active session found during initialization.");
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("🔐 Auth State Changed Event:", event);
-      if (session && isMounted) {
+      // Only trigger subscription if there's an active session and no existing channel is running
+      if (session && isMounted && !channelRef.current) {
         startSubscription();
-      } else {
+      } else if (!session && isMounted) {
         if (channelRef.current) {
-          console.log("🔌 Removing channel due to logout.");
+          console.log("🔌 Removing channel due to session termination.");
           supabase.removeChannel(channelRef.current);
           channelRef.current = null;
-          if (isMounted) setIsConnected(false);
+          setIsConnected(false);
         }
       }
     });

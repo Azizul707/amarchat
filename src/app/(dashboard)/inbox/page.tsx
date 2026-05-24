@@ -26,13 +26,12 @@ export default function InboxPage() {
     null
   );
 
-  // Stale closure safeguard ref
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
-  // Deep-link selection safeguard ref (Restored perfectly)
+  // Deep-link selection safeguard ref
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
   // DIAGNOSTIC LOG: Track when the parent component renders and check state size
