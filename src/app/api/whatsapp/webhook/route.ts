@@ -155,10 +155,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Process asynchronously so we can ack Meta within their timeout.
-  processWebhook(body).catch((error) => {
+  // Vercel কন্টেইনার যেন প্রসেস শেষ করার আগেই রেসপন্স রিটার্ন করে রিকোয়েস্ট ক্লোজ না করে, 
+  // সেজন্য processWebhook কে এওয়েট (await) করানো হলো।
+  try {
+    await processWebhook(body)
+  } catch (error) {
     console.error('Error processing webhook:', error)
-  })
+  }
 
   return NextResponse.json({ status: 'received' }, { status: 200 })
 }
@@ -668,16 +671,13 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
-// কনভারসেশন খোঁজা এবং তৈরি করার উন্নত কনকারেন্ট-সেফ মেকানিজম
 async function findOrCreateConversation(userId: string, contactId: string) {
-  // ১) প্রথমত: .single() সরিয়ে .limit(1).maybeSingle() ব্যবহার করা হলো।
-  // এটি একই ইউজারের জন্য কোনো কারণে একাধিক চ্যাট রো থাকলে ফেইল না করে সবচেয়ে লেটেস্টটি রিটার্ন করবে।
   const { data: existing, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('user_id', userId)
     .eq('contact_id', contactId)
-    .order('status', { ascending: true }) // 'open' / 'pending' চ্যাটকে 'closed' এর আগে প্রায়োরিটি দেবে
+    .order('status', { ascending: true })
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -686,28 +686,23 @@ async function findOrCreateConversation(userId: string, contactId: string) {
     return existing
   }
 
-  // ২) যদি কোনো কনভারসেশন না থাকে, তবে ব্যবহারকারীর প্রোফাইল থেকে workspace_id রিট্রাইভ করে নিয়ে আসা হচ্ছে।
   const { data: profile } = await supabaseAdmin()
     .from('profiles')
     .select('workspace_id')
     .eq('user_id', userId)
     .maybeSingle()
 
-  // ৩) নতুন কনভারসেশন তৈরি (workspace_id সহকারে)
   const { data: newConv, error: createError } = await supabaseAdmin()
     .from('conversations')
     .insert({
       user_id: userId,
       contact_id: contactId,
-      workspace_id: profile?.workspace_id || null, // workspace_id ডাটাবেজে সঠিক ম্যাপ নিশ্চিত করার জন্য
+      workspace_id: profile?.workspace_id || null,
     })
     .select()
     .maybeSingle()
 
   if (createError) {
-    // ৪) কনকারেন্সি বা রেইস-কন্ডিশন সেফগার্ড:
-    // একই সেকেন্ডে একাধিক মেসেজ এসে যদি কনভারসেশন ইনসার্ট করার ট্রাই করে এবং ডাটাবেজ লক বা ডুপ্লিকেট এরর দেয়,
-    // তবে ক্র্যাশ না করে এটি সাথে সাথে ফ্যালব্যাক রান করে অন্য রিকোয়েস্টের তৈরি কনভারসেশনটি কুয়েরি করে নিয়ে আসবে।
     console.warn('[webhook] conversation creation failed or concurrently existed, running fallback fetch:', createError.message)
     const { data: fallbackConv } = await supabaseAdmin()
       .from('conversations')
