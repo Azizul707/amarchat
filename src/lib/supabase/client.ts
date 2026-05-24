@@ -1,9 +1,7 @@
 import { createBrowserClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-// Singleton instance — one client shared across the whole browser session.
-// Creating multiple clients causes auth-lock contention ("Lock was released
-// because another request stole it") and intermittent fetch failures.
+// Singleton instance — shared across the whole browser session.
 let browserClient: SupabaseClient | undefined
 
 export function createClient() {
@@ -11,8 +9,19 @@ export function createClient() {
 
   browserClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: {
+        // Next.js App Router-এর এগ্রেসিভ ক্যাশিং বাইপাস করার জন্য cache: 'no-store' সেট করা হয়েছে
+        fetch: (url, options) => {
+          return fetch(url, {
+            ...options,
+            cache: 'no-store', // প্রতিটি কুয়েরি সরাসরি লাইভ ডাটাবেস থেকে ফ্রেশ ডেটা আনবে
+          });
+        },
+      },
+    }
   )
 
-  return browserClient
+  return browserClient;
 }
