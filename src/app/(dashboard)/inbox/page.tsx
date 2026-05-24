@@ -10,7 +10,7 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner"; // Sonner টোস্ট নোটিফিকেশন ইমপোর্ট করা হলো
+import { toast } from "sonner";
 
 export default function InboxContent() {
   const router = useRouter();
@@ -26,7 +26,6 @@ export default function InboxContent() {
     null
   );
   
-  // বর্তমানে লগইন করা এজেন্টের ইউজার আইডি ট্র্যাক করার স্টেট
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const activeConversationRef = useRef<Conversation | null>(null);
@@ -34,16 +33,14 @@ export default function InboxContent() {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
-  // স্টেল ক্লোজার এড়াতে লগইন করা ইউজারের আইডি ট্র্যাক করার Ref
   const currentUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
 
-  // Deep-link selection safeguard ref
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
-  // Check WhatsApp connection status on mount এবং লগইন করা এজেন্টের আইডি রিট্রিভ
+  // Check WhatsApp connection status on mount (Workspace-based)
   useEffect(() => {
     const checkConnection = async () => {
       const supabase = createClient();
@@ -54,22 +51,30 @@ export default function InboxContent() {
 
       if (!user) return;
       
-      // লগইন করা এজেন্টের আইডি সেভ করা হলো
       setCurrentUserId(user.id);
 
-      const { data } = await supabase
-        .from("whatsapp_config")
-        .select("status")
+      // প্রথমে এজেন্টের প্রোফাইল থেকে workspace_id সংগ্রহ করা হচ্ছে
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("workspace_id")
         .eq("user_id", user.id)
         .maybeSingle();
 
-      setWhatsappConnected(data?.status === "connected");
+      if (profile?.workspace_id) {
+        // এজেন্টের আইডির বদলে সম্পূর্ণ ওয়ার্কস্পেসের হোয়াটসঅ্যাপ স্ট্যাটাস চেক করা হচ্ছে
+        const { data } = await supabase
+          .from("whatsapp_config")
+          .select("status")
+          .eq("workspace_id", profile.workspace_id)
+          .maybeSingle();
+
+        setWhatsappConnected(data?.status === "connected");
+      }
     };
 
     checkConnection();
   }, []);
 
-  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডলার
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
@@ -127,7 +132,6 @@ export default function InboxContent() {
     [activeConversation?.id, router]
   );
 
-  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -149,12 +153,10 @@ export default function InboxContent() {
       }
 
       if (event.eventType === "UPDATE") {
-        // চ্যাট অ্যাসাইনমেন্ট ডিটেক্টর: যদি অন্য কেউ চ্যাটটি এই এজেন্টের আন্ডারে এসাইন করে
         if (
           conv.assigned_agent_id === loggedInUserId &&
           oldConv?.assigned_agent_id !== loggedInUserId
         ) {
-          // Sonner টোস্ট নোটিফিকেশন ট্রিগার করা হলো
           toast.info("A new chat has been assigned to you!", {
             description: `Customer: ${conv.contact?.name || conv.contact?.phone || "Unknown Customer"}`,
             action: {
@@ -163,11 +165,8 @@ export default function InboxContent() {
             },
           });
 
-          // মিষ্টি নোটিফিকেশন সাউন্ড প্লে করা হলো (public/sounds ফোল্ডারে ফাইলটি থাকতে হবে)
           const audio = new Audio("/sounds/notification.mp3");
-          audio.play().catch(() => {
-            // ব্রাউজার যদি অটো-প্লে ব্লক করে তবে সাইলেন্টলি হ্যান্ডেল করবে
-          });
+          audio.play().catch(() => {});
         }
 
         setConversations((prev) =>
@@ -184,7 +183,6 @@ export default function InboxContent() {
     [handleSelectConversation]
   );
 
-  // Subscribe to Supabase Realtime channel
   useRealtime({
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,

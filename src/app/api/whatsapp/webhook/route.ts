@@ -1,15 +1,36 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 
+// MatchedConfig টাইপ-সেফ ইন্টারফেস
+interface MatchedConfigRow {
+  id: string
+  verify_token?: string
+}
+
+// ContactRow টাইপ-সেফ ইন্টারফেস
+interface ContactRow {
+  id: string
+  user_id: string
+  workspace_id?: string | null
+  phone: string
+  name: string
+  avatar_url?: string | null
+}
+
+// ContactOutcome টাইপ-সেফ ইন্টারফেস (যা আগেরবার মিসিং হয়েছিল)
+interface ContactOutcome {
+  contact: ContactRow
+  wasCreated: boolean
+}
+
 // Lazy-initialized to avoid build-time crash when env vars are missing
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _adminClient: any = null
-function supabaseAdmin() {
+let _adminClient: SupabaseClient | null = null
+function supabaseAdmin(): SupabaseClient {
   if (!_adminClient) {
     _adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,7 +53,6 @@ interface WhatsAppMessage {
   sticker?: { id: string; mime_type: string }
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
-  /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
 }
 
@@ -76,7 +96,6 @@ export async function GET(request: Request) {
       )
     }
 
-    // Fetch all whatsapp configs to check verify tokens
     const { data: configs, error: configError } = await supabaseAdmin()
       .from('whatsapp_config')
       .select('id, verify_token')
@@ -89,22 +108,20 @@ export async function GET(request: Request) {
       )
     }
 
-    // Check if any config's verify_token matches.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let matchedConfig: any = null
+    let matchedConfig: MatchedConfigRow | null = null
     for (const config of configs) {
       if (!config.verify_token) continue
       try {
         if (decrypt(config.verify_token) === verifyToken) {
-          matchedConfig = config
+          matchedConfig = config as MatchedConfigRow
           break
         }
       } catch {
-        // Malformed / wrong-key token row — skip it and keep checking.
+        // skip
       }
     }
 
-    if (matchedConfig) {
+    if (matchedConfig && matchedConfig.verify_token) {
       if (isLegacyFormat(matchedConfig.verify_token)) {
         void supabaseAdmin()
           .from('whatsapp_config')
@@ -155,8 +172,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Vercel কন্টেইনার যেন প্রসেস শেষ করার আগেই রেসপন্স রিটার্ন করে রিকোয়েস্ট ক্লোজ না করে, 
-  // সেজন্য processWebhook কে এওয়েট (await) করানো হলো।
   try {
     await processWebhook(body)
   } catch (error) {
@@ -173,19 +188,16 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
     for (const change of entry.changes) {
       const value = change.value
 
-      // Handle status updates
       if (value.statuses) {
         for (const status of value.statuses) {
           await handleStatusUpdate(status)
         }
       }
 
-      // Handle incoming messages
       if (!value.messages || !value.contacts) continue
 
       const phoneNumberId = value.metadata.phone_number_id
 
-      // Find user's config by phone_number_id
       const { data: config, error: configError } = await supabaseAdmin()
         .from('whatsapp_config')
         .select('*')
@@ -197,7 +209,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         continue
       }
 
-      const decryptedAccessToken = decrypt(config.access_token)
+      // access_token null বা undefined হতে পারে বিধায় নিরাপদ '||' যুক্ত করা হলো
+      const decryptedAccessToken = decrypt(config.access_token || '')
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]
@@ -390,7 +403,6 @@ async function processMessage(
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
 
-  // Find or create contact
   const contactOutcome = await findOrCreateContact(
     userId,
     senderPhone,
@@ -399,7 +411,6 @@ async function processMessage(
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
 
-  // Find or create conversation
   const conversation = await findOrCreateConversation(
     userId,
     contactRecord.id
@@ -411,7 +422,6 @@ async function processMessage(
     return
   }
 
-  // Parse message content based on type
   const { contentText, mediaUrl, mediaType } = await parseMessageContent(
     message,
     accessToken
@@ -466,7 +476,6 @@ async function processMessage(
     return
   }
 
-  // Update conversation
   const { error: convError } = await supabaseAdmin()
     .from('conversations')
     .update({
@@ -618,23 +627,23 @@ async function parseMessageContent(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ContactRow = any
-
-interface ContactOutcome {
-  contact: ContactRow
-  wasCreated: boolean
-}
-
 async function findOrCreateContact(
   userId: string,
   phone: string,
   name: string
 ): Promise<ContactOutcome | null> {
+  const { data: profile } = await supabaseAdmin()
+    .from('profiles')
+    .select('workspace_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (!profile?.workspace_id) return null
+
   const { data: contacts, error: contactsError } = await supabaseAdmin()
     .from('contacts')
     .select('*')
-    .eq('user_id', userId)
+    .eq('workspace_id', profile.workspace_id)
 
   if (contactsError) {
     console.error('Error fetching contacts:', contactsError)
@@ -657,6 +666,7 @@ async function findOrCreateContact(
     .from('contacts')
     .insert({
       user_id: userId,
+      workspace_id: profile.workspace_id,
       phone,
       name: name || phone,
     })
