@@ -56,7 +56,7 @@ export default function InboxContent() {
     checkConnection();
   }, []);
 
-  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডলার (React 19 এর সুবিধা নিয়ে flushSync মুছে ফেলা হয়েছে)
+  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডলার
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
@@ -67,7 +67,6 @@ export default function InboxContent() {
           currentActiveConv &&
           newMsg.conversation_id === currentActiveConv.id
         ) {
-          // React 19 এর Automatic Batching এর ওপর ছেড়ে দিন, flushSync রেন্ডারিং রেস কন্ডিশন তৈরি করে
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             const withoutOptimistic = prev.filter(
@@ -103,7 +102,7 @@ export default function InboxContent() {
     []
   );
 
-  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার (flushSync সরিয়ে নেওয়া হয়েছে)
+  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার (এখানে ডুপ্লিকেট সেফগার্ড যুক্ত করা হয়েছে)
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -114,7 +113,13 @@ export default function InboxContent() {
       const currentActiveConv = activeConversationRef.current;
 
       if (event.eventType === "INSERT") {
-        setConversations((prev) => [conv, ...prev]);
+        setConversations((prev) => {
+          // ক্লায়েন্ট-সাইডে ডুপ্লিকেট কনভারসেশন ইনসার্ট হওয়া থেকে বিরত রাখার জন্য চেক
+          if (prev.some((c) => c.id === conv.id)) {
+            return prev;
+          }
+          return [conv, ...prev];
+        });
       }
 
       if (event.eventType === "UPDATE") {
@@ -142,7 +147,12 @@ export default function InboxContent() {
 
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
-      setConversations(loaded);
+      // রেন্ডার করার আগে ডাটাবেজ থেকে আসা কোনো ডুপ্লিকেট কনভারসেশন থাকলে ফিল্টার করে ইউনিক ডাটা রাখা হচ্ছে
+      const uniqueConversations = loaded.filter(
+        (conv, index, self) => self.findIndex((c) => c.id === conv.id) === index
+      );
+      setConversations(uniqueConversations);
+
       if (
         deepLinkConvId &&
         autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
@@ -168,7 +178,6 @@ export default function InboxContent() {
       setActiveContact(conv.contact ?? null);
       setMessages([]);
       autoSelectedForDeepLinkRef.current = conv.id;
-      // Route Group বাদ দিয়ে সঠিক রাউট (/inbox) ফিরিয়ে আনা হয়েছে
       router.replace(`/inbox?c=${conv.id}`, { scroll: false });
     },
     [activeConversation?.id, router]
@@ -179,7 +188,6 @@ export default function InboxContent() {
     setActiveContact(null);
     setMessages([]);
     autoSelectedForDeepLinkRef.current = null;
-    // Route Group বাদ দিয়ে সঠিক রাউট (/inbox) ফিরিয়ে আনা হয়েছে
     router.replace("/inbox", { scroll: false });
   }, [router]);
 

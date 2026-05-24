@@ -101,7 +101,8 @@ export function useRealtime({
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       // Guard: Skip if the auth state transition is identical to the previous one
-      if (lastAuthStateRef.current === event) {
+      // সেশন এক্সপায়ার বা রিনিউ টোকেন ফায়ার হলে যেন সাবস্ক্রিপশন সাইলেন্টলি অফ না হয়ে যায়, সেজন্য TOKEN_REFRESHED কে ছাড় দেওয়া হয়েছে
+      if (lastAuthStateRef.current === event && event !== "TOKEN_REFRESHED") {
         console.log(`[Auth] Ignoring duplicate ${event} event to protect channel state`);
         return;
       }
