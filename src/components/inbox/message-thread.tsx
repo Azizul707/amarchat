@@ -112,7 +112,7 @@ export function MessageThread({
   const { user } = useAuth();
   const { workspace } = useWorkspace();
   const [loading, setLoading] = useState(false);
-    //Debug console log
+  //Debug console log
   console.log("💬 [DIAGNOSTIC] MessageThread rendered. Messages in Props count:", messages.length);
   
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -318,17 +318,26 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // অটো-স্ক্রল লজিক
+  // অটো-স্ক্রল লজিক (React 19 এর সাথে সমন্বয় করে আরও শক্তিশালী করা হয়েছে)
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current;
+      
+      // ইনস্ট্যান্ট স্ক্রল
       el.scrollTop = el.scrollHeight;
 
-      const timer = setTimeout(() => {
+      // React 19 পেইন্ট সাইকেল ও ইমেজ রেন্ডারিং এর জন্য requestAnimationFrame এবং setTimeout মেকানিজম ব্যবহার করা হলো
+      const handleScroll = () => {
         el.scrollTop = el.scrollHeight;
-      }, 50);
+      };
 
-      return () => clearTimeout(timer);
+      const rafId = requestAnimationFrame(handleScroll);
+      const timer = setTimeout(handleScroll, 50);
+
+      return () => {
+        cancelAnimationFrame(rafId);
+        clearTimeout(timer);
+      };
     }
   }, [messages]);
 
@@ -521,7 +530,6 @@ export function MessageThread({
     }
   };
 
-  // রিয়্যাকশন (emoji) দেওয়ার জন্য ওরিজিনাল postReaction মেথডটি এখানে ওপরে ডিফাইন করা হলো (Rules of Hooks মেনে) [1.2.7]
   const postReaction = useCallback(
     async (messageId: string, emoji: string) => {
       if (!user?.id || !conversation) {
@@ -581,7 +589,7 @@ export function MessageThread({
   );
 
   // ====================================================================
-  // EMPTY STATE লজিক (নিশ্চিত করে যে এর নিচের সব কোডে contact এবং conversation থাকবেই)
+  // EMPTY STATE লজিক
   // ====================================================================
   if (!conversation || !contact) {
     return (

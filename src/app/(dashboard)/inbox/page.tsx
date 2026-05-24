@@ -10,7 +10,6 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { flushSync } from "react-dom";
 
 export default function InboxContent() {
   const router = useRouter();
@@ -57,7 +56,7 @@ export default function InboxContent() {
     checkConnection();
   }, []);
 
-  // Handle realtime message events safely using flushSync to force paints
+  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডলার (React 19 এর সুবিধা নিয়ে flushSync মুছে ফেলা হয়েছে)
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
@@ -68,48 +67,43 @@ export default function InboxContent() {
           currentActiveConv &&
           newMsg.conversation_id === currentActiveConv.id
         ) {
-          flushSync(() => {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              const withoutOptimistic = prev.filter(
-                (m) => !m.id.startsWith("temp-")
-              );
-              return [...withoutOptimistic, newMsg];
-            });
+          // React 19 এর Automatic Batching এর ওপর ছেড়ে দিন, flushSync রেন্ডারিং রেস কন্ডিশন তৈরি করে
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            const withoutOptimistic = prev.filter(
+              (m) => !m.id.startsWith("temp-")
+            );
+            return [...withoutOptimistic, newMsg];
           });
         }
 
-        flushSync(() => {
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === newMsg.conversation_id
-                ? {
-                    ...c,
-                    last_message_text: newMsg.content_text ?? "",
-                    last_message_at: newMsg.created_at,
-                    unread_count:
-                      currentActiveConv?.id === newMsg.conversation_id
-                        ? 0
-                        : c.unread_count + 1,
-                  }
-                : c
-            )
-          );
-        });
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === newMsg.conversation_id
+              ? {
+                  ...c,
+                  last_message_text: newMsg.content_text ?? "",
+                  last_message_at: newMsg.created_at,
+                  unread_count:
+                    currentActiveConv?.id === newMsg.conversation_id
+                      ? 0
+                      : c.unread_count + 1,
+                }
+              : c
+          )
+        );
       }
 
       if (event.eventType === "UPDATE") {
-        flushSync(() => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
-          );
-        });
+        setMessages((prev) =>
+          prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
+        );
       }
     },
     []
   );
 
-  // Handle realtime conversation events
+  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার (flushSync সরিয়ে নেওয়া হয়েছে)
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -120,24 +114,18 @@ export default function InboxContent() {
       const currentActiveConv = activeConversationRef.current;
 
       if (event.eventType === "INSERT") {
-        flushSync(() => {
-          setConversations((prev) => [conv, ...prev]);
-        });
+        setConversations((prev) => [conv, ...prev]);
       }
 
       if (event.eventType === "UPDATE") {
-        flushSync(() => {
-          setConversations((prev) =>
-            prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
-          );
-        });
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
+        );
 
         if (currentActiveConv && conv.id === currentActiveConv.id) {
-          flushSync(() => {
-            setActiveConversation((prev) =>
-              prev ? { ...prev, ...conv } : prev
-            );
-          });
+          setActiveConversation((prev) =>
+            prev ? { ...prev, ...conv } : prev
+          );
         }
       }
     },
@@ -180,6 +168,7 @@ export default function InboxContent() {
       setActiveContact(conv.contact ?? null);
       setMessages([]);
       autoSelectedForDeepLinkRef.current = conv.id;
+      // Route Group বাদ দিয়ে সঠিক রাউট (/inbox) ফিরিয়ে আনা হয়েছে
       router.replace(`/inbox?c=${conv.id}`, { scroll: false });
     },
     [activeConversation?.id, router]
@@ -190,6 +179,7 @@ export default function InboxContent() {
     setActiveContact(null);
     setMessages([]);
     autoSelectedForDeepLinkRef.current = null;
+    // Route Group বাদ দিয়ে সঠিক রাউট (/inbox) ফিরিয়ে আনা হয়েছে
     router.replace("/inbox", { scroll: false });
   }, [router]);
 

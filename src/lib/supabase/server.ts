@@ -23,6 +23,15 @@ export async function createClient() {
           }
         },
       },
+      global: {
+        // Next.js সার্ভার-সাইড এগ্রেসিভ ক্যাশিং বাইপাস করতে fetch কনফিগারেশন যুক্ত করা হলো
+        fetch: (url, options) => {
+          return fetch(url, {
+            ...options,
+            cache: 'no-store',
+          });
+        },
+      },
     }
   )
 }
