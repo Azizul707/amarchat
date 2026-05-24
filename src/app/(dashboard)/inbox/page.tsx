@@ -10,6 +10,7 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner"; // Sonner টোস্ট নোটিফিকেশন ইমপোর্ট করা হলো
 
 export default function InboxContent() {
   const router = useRouter();
@@ -24,16 +25,25 @@ export default function InboxContent() {
   const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
     null
   );
+  
+  // বর্তমানে লগইন করা এজেন্টের ইউজার আইডি ট্র্যাক করার স্টেট
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
+  // স্টেল ক্লোজার এড়াতে লগইন করা ইউজারের আইডি ট্র্যাক করার Ref
+  const currentUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
   // Deep-link selection safeguard ref
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
-  // Check WhatsApp connection status on mount
+  // Check WhatsApp connection status on mount এবং লগইন করা এজেন্টের আইডি রিট্রিভ
   useEffect(() => {
     const checkConnection = async () => {
       const supabase = createClient();
@@ -43,6 +53,9 @@ export default function InboxContent() {
       const user = session?.user;
 
       if (!user) return;
+      
+      // লগইন করা এজেন্টের আইডি সেভ করা হলো
+      setCurrentUserId(user.id);
 
       const { data } = await supabase
         .from("whatsapp_config")
@@ -102,7 +115,19 @@ export default function InboxContent() {
     []
   );
 
-  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার (এখানে ডুপ্লিকেট সেফগার্ড যুক্ত করা হয়েছে)
+  const handleSelectConversation = useCallback(
+    (conv: Conversation) => {
+      if (activeConversation?.id === conv.id) return;
+      setActiveConversation(conv);
+      setActiveContact(conv.contact ?? null);
+      setMessages([]);
+      autoSelectedForDeepLinkRef.current = conv.id;
+      router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+    },
+    [activeConversation?.id, router]
+  );
+
+  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডলার
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -110,11 +135,12 @@ export default function InboxContent() {
       old: Partial<Conversation>;
     }) => {
       const conv = event.new;
+      const oldConv = event.old;
       const currentActiveConv = activeConversationRef.current;
+      const loggedInUserId = currentUserIdRef.current;
 
       if (event.eventType === "INSERT") {
         setConversations((prev) => {
-          // ক্লায়েন্ট-সাইডে ডুপ্লিকেট কনভারসেশন ইনসার্ট হওয়া থেকে বিরত রাখার জন্য চেক
           if (prev.some((c) => c.id === conv.id)) {
             return prev;
           }
@@ -123,6 +149,27 @@ export default function InboxContent() {
       }
 
       if (event.eventType === "UPDATE") {
+        // চ্যাট অ্যাসাইনমেন্ট ডিটেক্টর: যদি অন্য কেউ চ্যাটটি এই এজেন্টের আন্ডারে এসাইন করে
+        if (
+          conv.assigned_agent_id === loggedInUserId &&
+          oldConv?.assigned_agent_id !== loggedInUserId
+        ) {
+          // Sonner টোস্ট নোটিফিকেশন ট্রিগার করা হলো
+          toast.info("A new chat has been assigned to you!", {
+            description: `Customer: ${conv.contact?.name || conv.contact?.phone || "Unknown Customer"}`,
+            action: {
+              label: "Open Chat",
+              onClick: () => handleSelectConversation(conv),
+            },
+          });
+
+          // মিষ্টি নোটিফিকেশন সাউন্ড প্লে করা হলো (public/sounds ফোল্ডারে ফাইলটি থাকতে হবে)
+          const audio = new Audio("/sounds/notification.mp3");
+          audio.play().catch(() => {
+            // ব্রাউজার যদি অটো-প্লে ব্লক করে তবে সাইলেন্টলি হ্যান্ডেল করবে
+          });
+        }
+
         setConversations((prev) =>
           prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
         );
@@ -134,7 +181,7 @@ export default function InboxContent() {
         }
       }
     },
-    []
+    [handleSelectConversation]
   );
 
   // Subscribe to Supabase Realtime channel
@@ -147,7 +194,6 @@ export default function InboxContent() {
 
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
-      // রেন্ডার করার আগে ডাটাবেজ থেকে আসা কোনো ডুপ্লিকেট কনভারসেশন থাকলে ফিল্টার করে ইউনিক ডাটা রাখা হচ্ছে
       const uniqueConversations = loaded.filter(
         (conv, index, self) => self.findIndex((c) => c.id === conv.id) === index
       );
@@ -169,18 +215,6 @@ export default function InboxContent() {
       }
     },
     [deepLinkConvId, activeConversation?.id]
-  );
-
-  const handleSelectConversation = useCallback(
-    (conv: Conversation) => {
-      if (activeConversation?.id === conv.id) return;
-      setActiveConversation(conv);
-      setActiveContact(conv.contact ?? null);
-      setMessages([]);
-      autoSelectedForDeepLinkRef.current = conv.id;
-      router.replace(`/inbox?c=${conv.id}`, { scroll: false });
-    },
-    [activeConversation?.id, router]
   );
 
   const handleCloseConversation = useCallback(() => {
