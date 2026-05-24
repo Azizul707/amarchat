@@ -26,9 +26,6 @@ export default function InboxPage() {
     null
   );
 
-  // 🌟 রিয়েল-টাইম রি-রেন্ডার বাধ্য করার জন্য একটি লাইভ ট্রিগার স্টেট [React 19 Bypass]
-  const [realtimeTrigger, setRealtimeTrigger] = useState<number>(0);
-
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     activeConversationRef.current = activeConversation;
@@ -36,7 +33,7 @@ export default function InboxPage() {
 
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
-  // WhatsApp কানেকশন স্ট্যাটাস চেক করা
+  // Check WhatsApp connection status on mount
   useEffect(() => {
     const checkConnection = async () => {
       const supabase = createClient();
@@ -59,7 +56,7 @@ export default function InboxPage() {
     checkConnection();
   }, []);
 
-  // রিয়েল-টাইম মেসেজ ইভেন্ট হ্যান্ডেল করা
+  // Handle realtime message events safely
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
@@ -76,6 +73,7 @@ export default function InboxPage() {
         ) {
           console.log("⭐ Message belongs to active conversation. Appending to screen!");
           
+          // Using React's functional state update with spread operator to force rendering safely
           flushSync(() => {
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -84,14 +82,12 @@ export default function InboxPage() {
               );
               return [...withoutOptimistic, newMsg];
             });
-            
-            // 🌟 প্রতিটি নতুন মেসেজে ট্রিগার সংখ্যা পরিবর্তন করে রিয়াক্টকে রি-রেন্ডারে বাধ্য করা হচ্ছে
-            setRealtimeTrigger((prev) => prev + 1);
           });
         } else {
           console.log("ℹ️ Message does not belong to active conversation.");
         }
 
+        // Immediately update left conversation list preview on new messages
         flushSync(() => {
           setConversations((prev) =>
             prev.map((c) =>
@@ -116,14 +112,13 @@ export default function InboxPage() {
           setMessages((prev) =>
             prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
           );
-          setRealtimeTrigger((prev) => prev + 1);
         });
       }
     },
     []
   );
 
-  // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডেল করা
+  // Handle realtime conversation events
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -158,7 +153,7 @@ export default function InboxPage() {
     []
   );
 
-  // রিয়েল-টাইম হুক সাবস্ক্রিপশন
+  // Subscribe to Supabase Realtime channel
   useRealtime({
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
@@ -216,7 +211,6 @@ export default function InboxPage() {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
-    setRealtimeTrigger((prev) => prev + 1);
   }, []);
 
   const handleUpdateMessage = useCallback(
@@ -224,7 +218,6 @@ export default function InboxPage() {
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
       );
-      setRealtimeTrigger((prev) => prev + 1);
     },
     []
   );
@@ -295,9 +288,9 @@ export default function InboxPage() {
             hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
-          {/* 🌟 key={'thread-' + activeConversation?.id + '-' + realtimeTrigger} প্রোপসটি রিয়াক্ট ১৯-কে প্রতিটা নতুন মেসেজে চাইল্ড উইন্ডো ফোর্স-রি-রেন্ডার করতে বাধ্য করবে */}
+          {/* Restored standard stable rendering key, completely removing the refresh loop */}
           <MessageThread
-            key={activeConversation ? `thread-${activeConversation.id}-${realtimeTrigger}` : "thread-empty"}
+            key={activeConversation ? `thread-${activeConversation.id}` : "thread-empty"}
             conversation={activeConversation}
             contact={activeContact}
             messages={messages}
