@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
@@ -8,11 +8,15 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { WifiOff } from "lucide-react";
+import { WifiOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { flushSync } from "react-dom";
 
-export default function InboxPage() {
+// Force Next.js to bypass static generation on Vercel
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function InboxContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const deepLinkConvId = searchParams.get("c");
@@ -31,11 +35,7 @@ export default function InboxPage() {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
-  // Deep-link selection safeguard ref
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
-
-  // DIAGNOSTIC LOG: Track when the parent component renders and check state size
-  console.log("🖥️ [DIAGNOSTIC] InboxPage rendered. Messages in State count:", messages.length);
 
   // Check WhatsApp connection status on mount
   useEffect(() => {
@@ -60,39 +60,26 @@ export default function InboxPage() {
     checkConnection();
   }, []);
 
-  // Handle realtime message events safely
+  // Handle realtime message events safely using flushSync to force paints
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
       const currentActiveConv = activeConversationRef.current;
-
-      console.log("📨 [REALTIME EVENT] Received message action:", event.eventType);
-      console.log("🗣️ [REALTIME EVENT] Active Conv ID in UI:", currentActiveConv?.id);
-      console.log("📨 [REALTIME EVENT] Incoming Message Conv ID:", newMsg.conversation_id);
 
       if (event.eventType === "INSERT") {
         if (
           currentActiveConv &&
           newMsg.conversation_id === currentActiveConv.id
         ) {
-          console.log("⭐ [REALTIME EVENT] Appending message to state now!");
-          
           flushSync(() => {
             setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) {
-                console.log("⚠️ [REALTIME EVENT] Message already exists in state, skipping.");
-                return prev;
-              }
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
               const withoutOptimistic = prev.filter(
                 (m) => !m.id.startsWith("temp-")
               );
-              const updated = [...withoutOptimistic, newMsg];
-              console.log("📈 [REALTIME EVENT] New messages array size will be:", updated.length);
-              return updated;
+              return [...withoutOptimistic, newMsg];
             });
           });
-        } else {
-          console.log("ℹ️ [REALTIME EVENT] Message is for a background chat. Skipping UI append.");
         }
 
         flushSync(() => {
@@ -210,7 +197,6 @@ export default function InboxPage() {
   }, [router]);
 
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
-    console.log("📥 [DIAGNOSTIC] handleMessagesLoaded called. Loaded messages count:", loaded.length);
     setMessages(loaded);
   }, []);
 
@@ -315,5 +301,20 @@ export default function InboxPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wrap the main Inbox Page inside a React Suspense Boundary for safe hydration on Vercel
+export default function InboxPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-slate-950">
+          <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
+        </div>
+      }
+    >
+      <InboxContent />
+    </Suspense>
   );
 }

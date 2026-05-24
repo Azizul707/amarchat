@@ -30,6 +30,9 @@ export function useRealtime({
   const onMessageRef = useRef(onMessageEvent);
   const onConversationRef = useRef(onConversationEvent);
   
+  // Guard ref to deduplicate rapid SIGNED_IN triggers in production
+  const lastAuthStateRef = useRef<string | null>(null);
+
   useEffect(() => {
     onMessageRef.current = onMessageEvent;
     onConversationRef.current = onConversationEvent;
@@ -44,7 +47,7 @@ export function useRealtime({
 
     const startSubscription = () => {
       if (channelRef.current) {
-        console.log("ℹ️ Realtime channel already exists. Skipping recreation.");
+        console.log("ℹ️ Realtime channel already exists. Skipping duplicate subscription.");
         return;
       }
 
@@ -89,7 +92,7 @@ export function useRealtime({
       channelRef.current = channel;
     };
 
-    // Fast check for active session, start channel if valid
+    // Fast check for active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session && isMounted) {
         startSubscription();
@@ -97,13 +100,20 @@ export function useRealtime({
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("🔐 Auth State Changed Event:", event);
-      // Only trigger subscription if there's an active session and no existing channel is running
-      if (session && isMounted && !channelRef.current) {
+      // Guard: Skip if the auth state transition is identical to the previous one
+      if (lastAuthStateRef.current === event) {
+        console.log(`[Auth] Ignoring duplicate ${event} event to protect channel state`);
+        return;
+      }
+
+      console.log(`🔐 [Auth] Verified State transition: ${event}`);
+      lastAuthStateRef.current = event;
+
+      if (session && isMounted) {
         startSubscription();
       } else if (!session && isMounted) {
         if (channelRef.current) {
-          console.log("🔌 Removing channel due to session termination.");
+          console.log("🔌 Removing channel due to session expiration.");
           supabase.removeChannel(channelRef.current);
           channelRef.current = null;
           setIsConnected(false);
