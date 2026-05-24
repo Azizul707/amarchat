@@ -112,6 +112,9 @@ export function MessageThread({
   const { user } = useAuth();
   const { workspace } = useWorkspace();
   const [loading, setLoading] = useState(false);
+    //Debug console log
+  console.log("💬 [DIAGNOSTIC] MessageThread rendered. Messages in Props count:", messages.length);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);

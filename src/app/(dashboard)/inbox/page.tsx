@@ -26,12 +26,17 @@ export default function InboxPage() {
     null
   );
 
+  // Stale closure safeguard ref
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
+  // Deep-link selection safeguard ref (Restored perfectly)
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
+
+  // DIAGNOSTIC LOG: Track when the parent component renders and check state size
+  console.log("🖥️ [DIAGNOSTIC] InboxPage rendered. Messages in State count:", messages.length);
 
   // Check WhatsApp connection status on mount
   useEffect(() => {
@@ -62,32 +67,35 @@ export default function InboxPage() {
       const newMsg = event.new;
       const currentActiveConv = activeConversationRef.current;
 
-      console.log("🔍 handleMessageEvent received:", event.eventType);
-      console.log("🗣️ Active Conversation ID in UI:", currentActiveConv?.id);
-      console.log("📨 Incoming Message Conversation ID:", newMsg.conversation_id);
+      console.log("📨 [REALTIME EVENT] Received message action:", event.eventType);
+      console.log("🗣️ [REALTIME EVENT] Active Conv ID in UI:", currentActiveConv?.id);
+      console.log("📨 [REALTIME EVENT] Incoming Message Conv ID:", newMsg.conversation_id);
 
       if (event.eventType === "INSERT") {
         if (
           currentActiveConv &&
           newMsg.conversation_id === currentActiveConv.id
         ) {
-          console.log("⭐ Message belongs to active conversation. Appending to screen!");
+          console.log("⭐ [REALTIME EVENT] Appending message to state now!");
           
-          // Using React's functional state update with spread operator to force rendering safely
           flushSync(() => {
             setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              if (prev.some((m) => m.id === newMsg.id)) {
+                console.log("⚠️ [REALTIME EVENT] Message already exists in state, skipping.");
+                return prev;
+              }
               const withoutOptimistic = prev.filter(
                 (m) => !m.id.startsWith("temp-")
               );
-              return [...withoutOptimistic, newMsg];
+              const updated = [...withoutOptimistic, newMsg];
+              console.log("📈 [REALTIME EVENT] New messages array size will be:", updated.length);
+              return updated;
             });
           });
         } else {
-          console.log("ℹ️ Message does not belong to active conversation.");
+          console.log("ℹ️ [REALTIME EVENT] Message is for a background chat. Skipping UI append.");
         }
 
-        // Immediately update left conversation list preview on new messages
         flushSync(() => {
           setConversations((prev) =>
             prev.map((c) =>
@@ -203,6 +211,7 @@ export default function InboxPage() {
   }, [router]);
 
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
+    console.log("📥 [DIAGNOSTIC] handleMessagesLoaded called. Loaded messages count:", loaded.length);
     setMessages(loaded);
   }, []);
 
@@ -288,7 +297,6 @@ export default function InboxPage() {
             hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
-          {/* Restored standard stable rendering key, completely removing the refresh loop */}
           <MessageThread
             key={activeConversation ? `thread-${activeConversation.id}` : "thread-empty"}
             conversation={activeConversation}
