@@ -10,7 +10,6 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-// রিয়াক্ট ১৯ প্রোডাকশন ব্যাচিং বাইপাস করার জন্য flushSync ইম্পোর্ট
 import { flushSync } from "react-dom";
 
 export default function InboxPage() {
@@ -26,6 +25,9 @@ export default function InboxPage() {
   const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
     null
   );
+
+  // 🌟 রিয়েল-টাইম রি-রেন্ডার বাধ্য করার জন্য একটি লাইভ ট্রিগার স্টেট [React 19 Bypass]
+  const [realtimeTrigger, setRealtimeTrigger] = useState<number>(0);
 
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
@@ -74,7 +76,6 @@ export default function InboxPage() {
         ) {
           console.log("⭐ Message belongs to active conversation. Appending to screen!");
           
-          // flushSync দিয়ে রিয়াক্ট ১৯ কে বাধ্য করা হচ্ছে মেসেজটি সাথে সাথে স্ক্রিনে পেইন্ট করতে
           flushSync(() => {
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -83,12 +84,14 @@ export default function InboxPage() {
               );
               return [...withoutOptimistic, newMsg];
             });
+            
+            // 🌟 প্রতিটি নতুন মেসেজে ট্রিগার সংখ্যা পরিবর্তন করে রিয়াক্টকে রি-রেন্ডারে বাধ্য করা হচ্ছে
+            setRealtimeTrigger((prev) => prev + 1);
           });
         } else {
           console.log("ℹ️ Message does not belong to active conversation.");
         }
 
-        // বাম পাশের কনভারসেশন লিস্টের লাস্ট মেসেজ প্রিভিউ এবং আনরিড কাউন্টও flushSync দিয়ে সাথে সাথে রেন্ডার করা হচ্ছে
         flushSync(() => {
           setConversations((prev) =>
             prev.map((c) =>
@@ -113,6 +116,7 @@ export default function InboxPage() {
           setMessages((prev) =>
             prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
           );
+          setRealtimeTrigger((prev) => prev + 1);
         });
       }
     },
@@ -212,6 +216,7 @@ export default function InboxPage() {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
+    setRealtimeTrigger((prev) => prev + 1);
   }, []);
 
   const handleUpdateMessage = useCallback(
@@ -219,6 +224,7 @@ export default function InboxPage() {
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
       );
+      setRealtimeTrigger((prev) => prev + 1);
     },
     []
   );
@@ -289,7 +295,9 @@ export default function InboxPage() {
             hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
+          {/* 🌟 key={'thread-' + activeConversation?.id + '-' + realtimeTrigger} প্রোপসটি রিয়াক্ট ১৯-কে প্রতিটা নতুন মেসেজে চাইল্ড উইন্ডো ফোর্স-রি-রেন্ডার করতে বাধ্য করবে */}
           <MessageThread
+            key={activeConversation ? `thread-${activeConversation.id}-${realtimeTrigger}` : "thread-empty"}
             conversation={activeConversation}
             contact={activeContact}
             messages={messages}
