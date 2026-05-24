@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
@@ -8,15 +8,11 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { WifiOff, Loader2 } from "lucide-react";
+import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { flushSync } from "react-dom";
 
-// Force Next.js to bypass static generation on Vercel
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-function InboxContent() {
+export default function InboxContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const deepLinkConvId = searchParams.get("c");
@@ -35,6 +31,7 @@ function InboxContent() {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
 
+  // Deep-link selection safeguard ref
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
   // Check WhatsApp connection status on mount
@@ -301,20 +298,5 @@ function InboxContent() {
         </div>
       </div>
     </div>
-  );
-}
-
-// Wrap the main Inbox Page inside a React Suspense Boundary for safe hydration on Vercel
-export default function InboxPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex h-screen items-center justify-center bg-slate-950">
-          <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
-        </div>
-      }
-    >
-      <InboxContent />
-    </Suspense>
   );
 }
