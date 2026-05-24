@@ -10,6 +10,8 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+// রিয়াক্ট ১৯ প্রোডাকশন ব্যাচিং বাইপাস করার জন্য flushSync ইম্পোর্ট
+import { flushSync } from "react-dom";
 
 export default function InboxPage() {
   const router = useRouter();
@@ -25,7 +27,6 @@ export default function InboxPage() {
     null
   );
 
-  // রিয়াক্টের Stale Closure (পুরনো মেমোরি ফাঁদ) এড়াতে useRef দিয়ে একটি লাইভ ট্র্যাকার তৈরি করা হলো
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     activeConversationRef.current = activeConversation;
@@ -67,48 +68,55 @@ export default function InboxPage() {
       console.log("📨 Incoming Message Conversation ID:", newMsg.conversation_id);
 
       if (event.eventType === "INSERT") {
-        // যদি মেসেজটি বর্তমান ওপেন থাকা চ্যাটের হয়, তবে ইউআই-তে যুক্ত করব
         if (
           currentActiveConv &&
           newMsg.conversation_id === currentActiveConv.id
         ) {
           console.log("⭐ Message belongs to active conversation. Appending to screen!");
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            const withoutOptimistic = prev.filter(
-              (m) => !m.id.startsWith("temp-")
-            );
-            return [...withoutOptimistic, newMsg];
+          
+          // flushSync দিয়ে রিয়াক্ট ১৯ কে বাধ্য করা হচ্ছে মেসেজটি সাথে সাথে স্ক্রিনে পেইন্ট করতে
+          flushSync(() => {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              const withoutOptimistic = prev.filter(
+                (m) => !m.id.startsWith("temp-")
+              );
+              return [...withoutOptimistic, newMsg];
+            });
           });
         } else {
           console.log("ℹ️ Message does not belong to active conversation.");
         }
 
-        // বাম পাশের কনভারসেশন লিস্টের লাস্ট মেসেজ প্রিভিউ এবং আনরিড কাউন্ট আপডেট করা
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === newMsg.conversation_id
-              ? {
-                  ...c,
-                  last_message_text: newMsg.content_text ?? "",
-                  last_message_at: newMsg.created_at,
-                  unread_count:
-                    currentActiveConv?.id === newMsg.conversation_id
-                      ? 0
-                      : c.unread_count + 1,
-                }
-              : c
-          )
-        );
+        // বাম পাশের কনভারসেশন লিস্টের লাস্ট মেসেজ প্রিভিউ এবং আনরিড কাউন্টও flushSync দিয়ে সাথে সাথে রেন্ডার করা হচ্ছে
+        flushSync(() => {
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === newMsg.conversation_id
+                ? {
+                    ...c,
+                    last_message_text: newMsg.content_text ?? "",
+                    last_message_at: newMsg.created_at,
+                    unread_count:
+                      currentActiveConv?.id === newMsg.conversation_id
+                        ? 0
+                        : c.unread_count + 1,
+                  }
+                : c
+            )
+          );
+        });
       }
 
       if (event.eventType === "UPDATE") {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
-        );
+        flushSync(() => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
+          );
+        });
       }
     },
-    [] // কোনো ডিপেন্ডেন্সি নেই, ফলে এটি সবসময় লেটেস্ট useRef ভ্যালু অ্যাক্সেস করবে এবং বাসি হবে না
+    []
   );
 
   // রিয়েল-টাইম কনভারসেশন ইভেন্ট হ্যান্ডেল করা
@@ -122,25 +130,31 @@ export default function InboxPage() {
       const currentActiveConv = activeConversationRef.current;
 
       if (event.eventType === "INSERT") {
-        setConversations((prev) => [conv, ...prev]);
+        flushSync(() => {
+          setConversations((prev) => [conv, ...prev]);
+        });
       }
 
       if (event.eventType === "UPDATE") {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
-        );
+        flushSync(() => {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
+          );
+        });
 
         if (currentActiveConv && conv.id === currentActiveConv.id) {
-          setActiveConversation((prev) =>
-            prev ? { ...prev, ...conv } : prev
-          );
+          flushSync(() => {
+            setActiveConversation((prev) =>
+              prev ? { ...prev, ...conv } : prev
+            );
+          });
         }
       }
     },
-    [] // কোনো ডিপেন্ডেন্সি নেই
+    []
   );
 
-  // রিয়েল-টাইম হুক সাবস্ক্রিপশন চালু করা
+  // রিয়েল-টাইম হুক সাবস্ক্রিপশন
   useRealtime({
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
