@@ -1,9 +1,24 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { Settings, MessageSquare, Tag, User, Lock, RefreshCw, Loader2, Briefcase, Users, Plus, ShieldCheck, ShieldAlert, Zap } from 'lucide-react';
+import { 
+  Settings, 
+  MessageSquare, 
+  Tag, 
+  User, 
+  Lock, 
+  RefreshCw, 
+  Loader2, 
+  Briefcase, 
+  Users, 
+  Plus, 
+  ShieldCheck, 
+  ShieldAlert, 
+  Zap, 
+  Brain 
+} from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspace } from '@/providers/workspace-provider';
@@ -15,7 +30,10 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
 
-const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'whatsapp', 'templates', 'tags'] as const;
+// এআই ট্রেইনিং বা নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
+import KnowledgeBaseSettings from './knowledge-base/page';
+
+const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'templates', 'tags'] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 function isTabValue(v: string | null): v is TabValue {
@@ -367,7 +385,6 @@ function AIForm() {
       </div>
 
       <div className="space-y-4 max-w-xl">
-        {/* ১. এআই এপিআই কি ইনপুট */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">AI API Key (BYOK)</label>
           <input 
@@ -382,7 +399,6 @@ function AIForm() {
           </p>
         </div>
 
-        {/* ২. এআই প্রোভাইডার বেস ইউআরএল ইনপুট */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">API Base URL (Endpoint Path)</label>
           <input 
@@ -393,11 +409,10 @@ function AIForm() {
             placeholder="e.g., https://api.openai.com/v1"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` এবং OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন [1.2.7]।
+            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` and OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন [1.2.7]।
           </p>
         </div>
 
-        {/* ৩. এআই মডেল নাম ইনপুট */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">AI Model Name</label>
           <input 
@@ -412,7 +427,6 @@ function AIForm() {
           </p>
         </div>
 
-        {/* ৪. এআই প্রম্পট নির্দেশনা ইনপুট */}
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">AI System Instructions (Prompt)</label>
           <textarea 
@@ -494,10 +508,20 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { profile: cachedProfile } = useAuth(); 
+  const { user, profile: cachedProfile } = useAuth(); // useAuth থেকে user এবং cachedProfile ডিস্ট্রাকচারিং করা হলো
+  const { workspace } = useWorkspace(); // useWorkspace থেকে workspace সংগ্রহ করা হলো
   const [localProfile, setLocalProfile] = useState<{ is_approved: boolean; subscription_expires_at: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [mounted, setMounted] = useState(false);
+
+  // রিয়্যাক্ট ১৯ এবং নেক্সট ১৬ এর রাউটার ক্যাশ এড়াতে লোকাল রিয়্যাক্টিভ স্টেট
+  const queryTab = searchParams.get('tab');
+  const initialTab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
+  const [tab, setTab] = useState<TabValue>(initialTab);
+
+  // সিকিউরিটি লুপহোল প্রোটেকশন: লগইন করা ইউজার কি ওয়ার্কস্পেসের ওনার (Owner) নাকি সাব-এজেন্ট (Agent)?
+  // সুপাবেস SaaS রুলস অনুযায়ী, যদি এজেন্টের আইডি ওনারের আইডির সাথে না মিলে, তবে সে কোনো এডমিন ফিচার দেখতে পারবে না
+  const isOwner = !!user && !!workspace && user.id === workspace.user_id;
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -507,17 +531,17 @@ export default function SettingsPage() {
   const getFreshStatus = async () => {
     try {
       setCheckingStatus(true);
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: { user: freshUser }, error: authError } = await supabase.auth.getUser();
       if (authError) {
         console.error("Auth Session Error:", authError);
         return;
       }
       
-      if (user) {
+      if (freshUser) {
         const { data, error } = await supabase
           .from('profiles')
           .select('is_approved, subscription_expires_at')
-          .eq('user_id', user.id)
+          .eq('user_id', freshUser.id)
           .maybeSingle();
 
         if (error) {
@@ -529,7 +553,7 @@ export default function SettingsPage() {
         if (data) {
           setLocalProfile(data);
         } else {
-          console.log("Logged In User Auth ID is:", user.id);
+          console.log("Logged In User Auth ID is:", freshUser.id);
         }
       }
     } catch (err) {
@@ -544,8 +568,25 @@ export default function SettingsPage() {
     getFreshStatus();
   }, []);
 
-  const queryTab = searchParams.get('tab');
-  const tab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
+  // ইউআরএল প্যারামিটার পরিবর্তন হলে লোকাল স্টেটকেও আপডেট করাবে (সিঙ্ক্রোনাইজেশন)
+  useEffect(() => {
+    const currentTab = searchParams.get('tab');
+    if (isTabValue(currentTab)) {
+      setTab(currentTab);
+    }
+  }, [searchParams]);
+
+  // সিকিউরিটি গার্ড: যদি কোনো সাব-এজেন্ট চালাকি করে ব্রাউজারের লিংকে সরাসরি টাইপ করে 
+  // সিকিউরড সেটিংস পেজে ঢোকার চেষ্টা করে (যেমন: ?tab=ai বা ?tab=whatsapp), 
+  // তবে রিয়্যাক্ট সিকিউরিটি সাথে সাথে তাকে আটকে সরাসরি তার নিজস্ব 'profile' ট্যাবে ফেরত পাঠিয়ে দেবে!
+  useEffect(() => {
+    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp'].includes(tab)) {
+      setTab('profile');
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('tab', 'profile');
+      router.replace(`/settings?${params.toString()}`, { scroll: false });
+    }
+  }, [tab, isOwner, mounted, router, searchParams]);
 
   const activeApproved = localProfile ? localProfile.is_approved : (cachedProfile as unknown as { is_approved?: boolean })?.is_approved;
   const activeExpiry = localProfile ? localProfile.subscription_expires_at : (cachedProfile as unknown as { subscription_expires_at?: string | null })?.subscription_expires_at;
@@ -557,7 +598,9 @@ export default function SettingsPage() {
   
   const isLocked = !isSubscriptionActive;
 
+  // ট্যাব পরিবর্তনের সাথে সাথে ইউজার সাথে সাথে ভিজ্যুয়াল আপডেট পাবেন (ল্যাগ ফ্রি ট্যাব সুইচিং)
   const onChange = (next: TabValue) => {
+    setTab(next); // লোকাল স্টেট সাথে সাথে আপডেট করে রি-রেন্ডার ট্রিগার করা হলো
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next);
     router.replace(`/settings?${params.toString()}`, { scroll: false });
@@ -579,64 +622,83 @@ export default function SettingsPage() {
 
       <Tabs value={tab} onValueChange={(v) => onChange(v as TabValue)}>
         <TabsList className="bg-slate-900 border border-slate-700 flex flex-wrap">
-          {/* Profile Tab */}
+          {/* Profile Tab (সবার জন্য উন্মুক্ত) */}
           <TabsTrigger
             value="profile"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
           >
             <User className="size-4" />
             Profile
           </TabsTrigger>
 
-          {/* Workspace Tab */}
-          <TabsTrigger
-            value="workspace"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
-          >
-            <Briefcase className="size-4" />
-            Workspace
-          </TabsTrigger>
+          {/* Workspace Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {isOwner && (
+            <TabsTrigger
+              value="workspace"
+              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+            >
+              <Briefcase className="size-4" />
+              Workspace
+            </TabsTrigger>
+          )}
 
-          {/* Team Tab */}
-          <TabsTrigger
-            value="team"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
-          >
-            <Users className="size-4" />
-            Team
-          </TabsTrigger>
+          {/* Team Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {isOwner && (
+            <TabsTrigger
+              value="team"
+              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+            >
+              <Users className="size-4" />
+              Team
+            </TabsTrigger>
+          )}
 
-          {/* New AI Chatbot Tab */}
-          <TabsTrigger
-            value="ai"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
-          >
-            <Zap className="size-4" />
-            AI Chatbot
-          </TabsTrigger>
+          {/* AI Chatbot Tab (শুধুমাত্র ওনার দেখতে পাবে - স্পর্শকাতর এপিআই কি সুরক্ষায়) */}
+          {isOwner && (
+            <TabsTrigger
+              value="ai"
+              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+            >
+              <Zap className="size-4" />
+              AI Chatbot
+            </TabsTrigger>
+          )}
 
-          {/* WhatsApp Settings Tab */}
-          <TabsTrigger
-            value="whatsapp"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
-          >
-            <Settings className="size-4" />
-            WhatsApp Config
-          </TabsTrigger>
+          {/* AI Training Tab (RAG) (শুধুমাত্র ওনার দেখতে পাবে - নলেজ বেস মডিউলে) */}
+          {isOwner && (
+            <TabsTrigger
+              value="kb"
+              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+            >
+              <Brain className="size-4" />
+              AI Training
+            </TabsTrigger>
+          )}
 
-          {/* Message Templates Tab */}
+          {/* WhatsApp Settings Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {isOwner && (
+            <TabsTrigger
+              value="whatsapp"
+              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+            >
+              <Settings className="size-4" />
+              WhatsApp Config
+            </TabsTrigger>
+          )}
+
+          {/* Message Templates Tab (সবার জন্য উন্মুক্ত) */}
           <TabsTrigger
             value="templates"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
           >
             <MessageSquare className="size-4" />
             Templates
           </TabsTrigger>
 
-          {/* Tag Manager Tab */}
+          {/* Tag Manager Tab (সবার জন্য উন্মুক্ত) */}
           <TabsTrigger
             value="tags"
-            className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
           >
             <Tag className="size-4" />
             Tags
@@ -650,37 +712,64 @@ export default function SettingsPage() {
           <SessionsCard />
         </TabsContent>
 
-        {/* WORKSPACE TAB CONTENT */}
-        <TabsContent value="workspace" className="space-y-6">
-          <WorkspaceForm />
-        </TabsContent>
+        {/* WORKSPACE TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {isOwner && (
+          <TabsContent value="workspace" className="space-y-6">
+            <WorkspaceForm />
+          </TabsContent>
+        )}
 
-        {/* TEAM TAB CONTENT */}
-        <TabsContent value="team" className="space-y-6">
-          <TeamForm />
-        </TabsContent>
+        {/* TEAM TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {isOwner && (
+          <TabsContent value="team" className="space-y-6">
+            <TeamForm />
+          </TabsContent>
+        )}
 
-        {/* NEW AI TAB CONTENT */}
-        <TabsContent value="ai" className="space-y-6">
-          <AIForm />
-        </TabsContent>
+        {/* AI TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {isOwner && (
+          <TabsContent value="ai" className="space-y-6">
+            <AIForm />
+          </TabsContent>
+        )}
 
-        {/* WHATSAPP TAB CONTENT */}
-        <TabsContent value="whatsapp">
-          {!mounted || checkingStatus ? (
-            <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
-            </div>
-          ) : isLocked ? (
-            <LockedTabCard 
-              title="WhatsApp Integration" 
-              onRefresh={handleRefreshStatus}
-              checking={checkingStatus}
-            />
-          ) : (
-            <WhatsAppConfig />
-          )}
-        </TabsContent>
+        {/* AI TRAINING (RAG) TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {isOwner && (
+          <TabsContent value="kb">
+            {!mounted || checkingStatus ? (
+              <div className="flex h-48 items-center justify-center">
+                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+              </div>
+            ) : isLocked ? (
+              <LockedTabCard 
+                title="AI Training (Knowledge Base)" 
+                onRefresh={handleRefreshStatus}
+                checking={checkingStatus}
+              />
+            ) : (
+              <KnowledgeBaseSettings />
+            )}
+          </TabsContent>
+        )}
+
+        {/* WHATSAPP TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {isOwner && (
+          <TabsContent value="whatsapp">
+            {!mounted || checkingStatus ? (
+              <div className="flex h-48 items-center justify-center">
+                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+              </div>
+            ) : isLocked ? (
+              <LockedTabCard 
+                title="WhatsApp Integration" 
+                onRefresh={handleRefreshStatus}
+                checking={checkingStatus}
+              />
+            ) : (
+              <WhatsAppConfig />
+            )}
+          </TabsContent>
+        )}
 
         {/* TEMPLATES TAB CONTENT */}
         <TabsContent value="templates">
