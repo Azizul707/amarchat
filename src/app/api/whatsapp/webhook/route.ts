@@ -22,11 +22,24 @@ interface ContactRow {
   avatar_url?: string | null
 }
 
-// ContactOutcome টাইপ-সেফ ইন্টারফেস (যা আগেরবার মিসিং হয়েছিল)
+// ContactOutcome টাইপ-সেফ ইন্টারফেস
 interface ContactOutcome {
   contact: ContactRow
   wasCreated: boolean
 }
+
+// GPT-4o মাল্টিমোডাল ইনপুট টাইপ ইন্টারফেস
+interface MessageContentText {
+  type: 'text'
+  text: string
+}
+
+interface MessageContentImage {
+  type: 'image_url'
+  image_url: { url: string }
+}
+
+type MessageContent = MessageContentText | MessageContentImage
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 let _adminClient: SupabaseClient | null = null
@@ -209,7 +222,6 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         continue
       }
 
-      // access_token null বা undefined হতে পারে বিধায় নিরাপদ '||' যুক্ত করা হলো
       const decryptedAccessToken = decrypt(config.access_token || '')
 
       for (let i = 0; i < value.messages.length; i++) {
@@ -220,7 +232,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           message,
           contact,
           config.user_id,
-          decryptedAccessToken
+          decryptedAccessToken,
+          phoneNumberId
         )
       }
     }
@@ -394,11 +407,44 @@ async function handleReaction(
   }
 }
 
+async function sendWhatsAppMessage(
+  phone: string,
+  text: string,
+  phoneNumberId: string,
+  accessToken: string
+) {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: text },
+        }),
+      }
+    )
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      console.error('[webhook] Meta API send message failed:', errBody)
+    }
+  } catch (err) {
+    console.error('[webhook] sendWhatsAppMessage exception:', err)
+  }
+}
+
 async function processMessage(
   message: WhatsAppMessage,
   contact: { profile: { name: string }; wa_id: string },
   userId: string,
-  accessToken: string
+  accessToken: string,
+  phoneNumberId: string
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -422,23 +468,62 @@ async function processMessage(
     return
   }
 
-  const { contentText, mediaUrl, mediaType } = await parseMessageContent(
-    message,
-    accessToken
-  )
+  let contentText: string | null = null
+  let mediaUrl: string | null = null
+  let mediaType: string | null = null
 
-  let replyToInternalId: string | null = null
-  if (message.context?.id) {
-    replyToInternalId = await lookupInternalIdByMetaId(
-      message.context.id,
-      conversation.id
-    )
-    if (!replyToInternalId) {
-      console.warn(
-        '[webhook] reply context parent not found:',
-        message.context.id
-      )
+  if (message.type === 'audio' && message.audio?.id) {
+    try {
+      // getMediaUrl এর রিটার্ন টাইপ স্পষ্টভাবে অবজেক্ট হিসেবে কাস্ট করা হলো [1]
+      const verifiedUrlData = (await getMediaUrl({
+        mediaId: message.audio.id,
+        accessToken,
+      })) as { url: string; mimeType: string } | null
+
+      // অবজেক্টের ভেতর .url প্রোপার্টি ভেরিফাই করে ডাউনলোড করা হচ্ছে [1]
+      if (verifiedUrlData && verifiedUrlData.url) {
+        const audioRes = await fetch(verifiedUrlData.url, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        })
+        
+        if (!audioRes.ok) {
+          throw new Error(`Media download failed with status: ${audioRes.status}`)
+        }
+
+        const arrayBuffer = await audioRes.arrayBuffer()
+        const audioBuffer = Buffer.from(arrayBuffer)
+        
+        const formData = new FormData()
+        const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
+        formData.append('file', blob, 'voice.ogg')
+        formData.append('model', 'whisper-1')
+        formData.append('language', 'bn')
+
+        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+          body: formData,
+        })
+
+        if (whisperRes.ok) {
+          const transData = await whisperRes.json()
+          contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
+          mediaUrl = `/api/whatsapp/media/${message.audio.id}`
+        }
+      }
+    } catch (err) {
+      console.error('[webhook] Whisper transcription failed:', err)
+      contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
     }
+  } else {
+    const parsed = await parseMessageContent(message, accessToken)
+    contentText = parsed.contentText
+    mediaUrl = parsed.mediaUrl
+    mediaType = parsed.mediaType
   }
 
   void mediaType
@@ -468,7 +553,6 @@ async function processMessage(
     message_id: message.id,
     status: 'delivered',
     created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
-    reply_to_message_id: replyToInternalId,
   })
 
   if (msgError) {
@@ -476,12 +560,99 @@ async function processMessage(
     return
   }
 
-  const { error: convError } = await supabaseAdmin()
+  if (conversation.ai_active && contentText) {
+    try {
+      const embedRes = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: contentText,
+          model: 'text-embedding-3-small',
+        }),
+      })
+
+      let matchedContext = ''
+      if (embedRes.ok) {
+        const embedData = await embedRes.json()
+        const queryVector = embedData.data[0].embedding
+
+        const { data: ragDocs, error: ragError } = await supabaseAdmin()
+          .rpc('match_knowledge_base', {
+            query_embedding: queryVector,
+            match_threshold: 0.3,
+            match_count: 3,
+            p_workspace_id: conversation.workspace_id,
+          })
+
+        if (!ragError && ragDocs) {
+          matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+        }
+      }
+
+      const userMessageContent: MessageContent[] = [{ type: 'text', text: contentText }]
+      if (message.type === 'image' && mediaUrl) {
+        userMessageContent.push({
+          type: 'image_url',
+          image_url: { url: mediaUrl },
+        })
+      }
+
+      const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: `You are "Lamia", an expert, highly polite, and extremely persuasive sales executive for this business. 
+              Always speak in a friendly Bangla/Banglish blend, using respectful terms like "Apu" or "Bhaiya".
+              Provide discount packages or combo offers if the customer negotiates or thinks the price is high.
+              Use this business knowledge base to answer perfectly and close the sale:
+              ---------------------
+              ${matchedContext || 'No specific knowledge base matched. Rely on general warm customer support.'}
+              ---------------------`
+            },
+            {
+              role: 'user',
+              content: userMessageContent
+            }
+          ],
+        }),
+      })
+
+      if (gptRes.ok) {
+        const gptData = await gptRes.json()
+        const aiReplyText = gptData.choices[0].message.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
+
+        await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
+
+        await supabaseAdmin().from('messages').insert({
+          conversation_id: conversation.id,
+          sender_type: 'bot',
+          content_type: 'text',
+          content_text: aiReplyText,
+          status: 'sent',
+          created_at: new Date().toISOString(),
+        })
+      }
+    } catch (err) {
+      console.error('[webhook] GPT-4o execution or send failed:', err)
+    }
+  }
+
+  const { error: convError = null } = await supabaseAdmin()
     .from('conversations')
     .update({
       last_message_text: contentText || `[${message.type}]`,
       last_message_at: new Date().toISOString(),
-      unread_count: (conversation.unread_count || 0) + 1,
+      unread_count: conversation.unread_count + 1,
       updated_at: new Date().toISOString(),
     })
     .eq('id', conversation.id)
