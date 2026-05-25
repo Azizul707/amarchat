@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react'; // useRef সরিয়ে ফেলা হলো
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { 
@@ -30,7 +30,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
 
-// আমাদের নতুন এআই ট্রেইনিং বা নলেজ বেস কম্পোনেন্টটি ইম্পোর্ট করা হলো
+// নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
 import KnowledgeBaseSettings from './knowledge-base/page';
 
 const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'templates', 'tags'] as const;
@@ -423,7 +423,7 @@ function AIForm() {
             placeholder="e.g., gpt-4o-mini or google/gemini-2.5-flash"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`)।
+            📌 আপনার প্রোভাইडर প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`)।
           </p>
         </div>
 
@@ -479,7 +479,7 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <a 
-            href="https://t.me/your_support_link"
+            href="https://t.me/aamarchat_support"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-black bg-indigo-500 hover:bg-indigo-400 rounded-lg transition-colors flex items-center justify-center gap-1.5"
@@ -508,8 +508,7 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, profile: cachedProfile } = useAuth();
-  const { workspace } = useWorkspace();
+  const { profile: cachedProfile } = useAuth();
   const [localProfile, setLocalProfile] = useState<{ is_approved: boolean; subscription_expires_at: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -519,15 +518,12 @@ export default function SettingsPage() {
   const initialTab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
   const [tab, setTab] = useState<TabValue>(initialTab);
 
-  // সিকিউরিটি লুপহোল প্রোটেকশন: টাইপসেফ কাস্টিং এর মাধ্যমে user_id প্রোপার্টির টাইপ এরর দূর করা হলো 
-  const isOwner = !!user && !!workspace && user.id === (workspace as { user_id?: string }).user_id;
-
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // useEffect এর এড়াতে getFreshStatus কে useCallback দিয়ে র্যাপ করা হলো
+  // useEffect এর লুপ এড়াতে getFreshStatus কে useCallback দিয়ে র্যাপ করা হলো 
   const getFreshStatus = useCallback(async () => {
     try {
       setCheckingStatus(true);
@@ -566,7 +562,7 @@ export default function SettingsPage() {
   useEffect(() => {
     setMounted(true);
     getFreshStatus();
-  }, [getFreshStatus]); // getFreshStatus কে ডিপেন্ডেন্সি এরেতে যুক্ত করা হলো [1.1.2]
+  }, [getFreshStatus]); // getFreshStatus কে ডিপেন্ডেন্সি এরেতে যুক্ত করা হলো
 
   // ইউআরএল প্যারামিটার পরিবর্তন হলে লোকাল স্টেটকেও আপডেট করাবে (সিঙ্ক্রোনাইজেশন)
   useEffect(() => {
@@ -575,6 +571,13 @@ export default function SettingsPage() {
       setTab(currentTab);
     }
   }, [searchParams]);
+
+  const activeApproved = localProfile ? localProfile.is_approved : (cachedProfile as unknown as { is_approved?: boolean })?.is_approved;
+  const activeExpiry = localProfile ? localProfile.subscription_expires_at : (cachedProfile as unknown as { subscription_expires_at?: string | null })?.subscription_expires_at;
+
+  // সিকিউরিটি লুপহোল প্রোটেকশন: আপনার এপ্রুভালের ওপর ভিত্তি করে ওনার লজিক সেট করা হলো
+  // কেউ একাউন্ট খোলার পর আপনি যাকে এপ্রুভ করবেন (is_approved === true), সে-ই একমাত্র ওনার/এডমিন
+  const isOwner = !!activeApproved;
 
   // সিকিউরিটি গার্ড: এজেন্টদের সরাসরি লিংকের অ্যাক্সেস ব্লক করে রিডাইরেক্ট করবে
   useEffect(() => {
@@ -585,9 +588,6 @@ export default function SettingsPage() {
       router.replace(`/settings?${params.toString()}`, { scroll: false });
     }
   }, [tab, isOwner, mounted, router, searchParams]);
-
-  const activeApproved = localProfile ? localProfile.is_approved : (cachedProfile as unknown as { is_approved?: boolean })?.is_approved;
-  const activeExpiry = localProfile ? localProfile.subscription_expires_at : (cachedProfile as unknown as { subscription_expires_at?: string | null })?.subscription_expires_at;
 
   const isSubscriptionActive = 
     !!activeApproved && 
