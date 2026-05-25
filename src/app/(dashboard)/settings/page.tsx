@@ -409,7 +409,7 @@ function AIForm() {
             placeholder="e.g., https://api.openai.com/v1"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` and OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন।
+            📌 ডাইনামিক বেস url। OpenAI এর জন্য `https://api.openai.com/v1` and OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন।
           </p>
         </div>
 
