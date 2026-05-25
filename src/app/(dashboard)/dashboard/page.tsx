@@ -172,7 +172,7 @@ export default function DashboardPage() {
           </div>
           {!profile.is_approved && (
             <a 
-              href="mailto:developer.arafin@gmail.com" 
+              href="https://t.me/aamarchat" 
               className="text-xs font-semibold px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-lg transition"
             >
               যোগাযোগ করুন
