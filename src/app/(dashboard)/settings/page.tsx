@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react'; // useRef সরিয়ে ফেলা হলো
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { 
@@ -30,7 +30,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
 
-// এআই ট্রেইনিং বা নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
+// আমাদের নতুন এআই ট্রেইনিং বা নলেজ বেস কম্পোনেন্টটি ইম্পোর্ট করা হলো
 import KnowledgeBaseSettings from './knowledge-base/page';
 
 const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'templates', 'tags'] as const;
@@ -381,7 +381,7 @@ function AIForm() {
           <Zap className="h-5 w-5 text-indigo-400 animate-pulse" />
           <span>Universal AI Chatbot Configuration</span>
         </h3>
-        <p className="text-sm text-slate-400">Configure your chatbot API endpoints. Supports OpenAI, OpenRouter, DeepSeek, or any custom provider [1.2.7].</p>
+        <p className="text-sm text-slate-400">Configure your chatbot API endpoints. Supports OpenAI, OpenRouter, DeepSeek, or any custom provider.</p>
       </div>
 
       <div className="space-y-4 max-w-xl">
@@ -395,7 +395,7 @@ function AIForm() {
             placeholder="OpenAI, OpenRouter, or DeepSeek API Key"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে [1.2.2]।
+            📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে।
           </p>
         </div>
 
@@ -409,7 +409,7 @@ function AIForm() {
             placeholder="e.g., https://api.openai.com/v1"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` and OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন [1.2.7]।
+            📌 ডাইনামিক বেস ইউআরএল। OpenAI এর জন্য `https://api.openai.com/v1` and OpenRouter এর জন্য `https://openrouter.ai/api/v1` ব্যবহার করুন।
           </p>
         </div>
 
@@ -423,7 +423,7 @@ function AIForm() {
             placeholder="e.g., gpt-4o-mini or google/gemini-2.5-flash"
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`) [1.2.7]।
+            📌 আপনার প্রোভাইডার প্যানেল থেকে সঠিক মডেলের নামটি লিখুন (যেমন: OpenAI এর জন্য `gpt-4o-mini` এবং OpenRouter এর জেমিনির জন্য `google/gemini-2.5-flash`)।
           </p>
         </div>
 
@@ -508,8 +508,8 @@ function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefres
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, profile: cachedProfile } = useAuth(); // useAuth থেকে user এবং cachedProfile ডিস্ট্রাকচারিং করা হলো
-  const { workspace } = useWorkspace(); // useWorkspace থেকে workspace সংগ্রহ করা হলো
+  const { user, profile: cachedProfile } = useAuth();
+  const { workspace } = useWorkspace();
   const [localProfile, setLocalProfile] = useState<{ is_approved: boolean; subscription_expires_at: string | null } | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -519,16 +519,16 @@ export default function SettingsPage() {
   const initialTab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
   const [tab, setTab] = useState<TabValue>(initialTab);
 
-  // সিকিউরিটি লুপহোল প্রোটেকশন: লগইন করা ইউজার কি ওয়ার্কস্পেসের ওনার (Owner) নাকি সাব-এজেন্ট (Agent)?
-  // সুপাবেস SaaS রুলস অনুযায়ী, যদি এজেন্টের আইডি ওনারের আইডির সাথে না মিলে, তবে সে কোনো এডমিন ফিচার দেখতে পারবে না
-  const isOwner = !!user && !!workspace && user.id === workspace.user_id;
+  // সিকিউরিটি লুপহোল প্রোটেকশন: টাইপসেফ কাস্টিং এর মাধ্যমে user_id প্রোপার্টির টাইপ এরর দূর করা হলো 
+  const isOwner = !!user && !!workspace && user.id === (workspace as { user_id?: string }).user_id;
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const getFreshStatus = async () => {
+  // useEffect এর এড়াতে getFreshStatus কে useCallback দিয়ে র্যাপ করা হলো
+  const getFreshStatus = useCallback(async () => {
     try {
       setCheckingStatus(true);
       const { data: { user: freshUser }, error: authError } = await supabase.auth.getUser();
@@ -561,12 +561,12 @@ export default function SettingsPage() {
     } finally {
       setCheckingStatus(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     setMounted(true);
     getFreshStatus();
-  }, []);
+  }, [getFreshStatus]); // getFreshStatus কে ডিপেন্ডেন্সি এরেতে যুক্ত করা হলো [1.1.2]
 
   // ইউআরএল প্যারামিটার পরিবর্তন হলে লোকাল স্টেটকেও আপডেট করাবে (সিঙ্ক্রোনাইজেশন)
   useEffect(() => {
@@ -576,9 +576,7 @@ export default function SettingsPage() {
     }
   }, [searchParams]);
 
-  // সিকিউরিটি গার্ড: যদি কোনো সাব-এজেন্ট চালাকি করে ব্রাউজারের লিংকে সরাসরি টাইপ করে 
-  // সিকিউরড সেটিংস পেজে ঢোকার চেষ্টা করে (যেমন: ?tab=ai বা ?tab=whatsapp), 
-  // তবে রিয়্যাক্ট সিকিউরিটি সাথে সাথে তাকে আটকে সরাসরি তার নিজস্ব 'profile' ট্যাবে ফেরত পাঠিয়ে দেবে!
+  // সিকিউরিটি গার্ড: এজেন্টদের সরাসরি লিংকের অ্যাক্সেস ব্লক করে রিডাইরেক্ট করবে
   useEffect(() => {
     if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp'].includes(tab)) {
       setTab('profile');
@@ -598,7 +596,6 @@ export default function SettingsPage() {
   
   const isLocked = !isSubscriptionActive;
 
-  // ট্যাব পরিবর্তনের সাথে সাথে ইউজার সাথে সাথে ভিজ্যুয়াল আপডেট পাবেন (ল্যাগ ফ্রি ট্যাব সুইচিং)
   const onChange = (next: TabValue) => {
     setTab(next); // লোকাল স্টেট সাথে সাথে আপডেট করে রি-রেন্ডার ট্রিগার করা হলো
     const params = new URLSearchParams(searchParams.toString());
@@ -622,7 +619,7 @@ export default function SettingsPage() {
 
       <Tabs value={tab} onValueChange={(v) => onChange(v as TabValue)}>
         <TabsList className="bg-slate-900 border border-slate-700 flex flex-wrap">
-          {/* Profile Tab (সবার জন্য উন্মুক্ত) */}
+          {/* Profile Tab */}
           <TabsTrigger
             value="profile"
             className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
@@ -631,7 +628,7 @@ export default function SettingsPage() {
             Profile
           </TabsTrigger>
 
-          {/* Workspace Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {/* Workspace Tab */}
           {isOwner && (
             <TabsTrigger
               value="workspace"
@@ -642,7 +639,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           )}
 
-          {/* Team Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {/* Team Tab */}
           {isOwner && (
             <TabsTrigger
               value="team"
@@ -653,7 +650,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           )}
 
-          {/* AI Chatbot Tab (শুধুমাত্র ওনার দেখতে পাবে - স্পর্শকাতর এপিআই কি সুরক্ষায়) */}
+          {/* New AI Chatbot Tab */}
           {isOwner && (
             <TabsTrigger
               value="ai"
@@ -664,7 +661,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           )}
 
-          {/* AI Training Tab (RAG) (শুধুমাত্র ওনার দেখতে পাবে - নলেজ বেস মডিউলে) */}
+          {/* New AI Training (RAG) Tab */}
           {isOwner && (
             <TabsTrigger
               value="kb"
@@ -675,7 +672,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           )}
 
-          {/* WhatsApp Settings Tab (শুধুমাত্র ওনার দেখতে পাবে) */}
+          {/* WhatsApp Settings Tab */}
           {isOwner && (
             <TabsTrigger
               value="whatsapp"
@@ -686,7 +683,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           )}
 
-          {/* Message Templates Tab (সবার জন্য উন্মুক্ত) */}
+          {/* Message Templates Tab */}
           <TabsTrigger
             value="templates"
             className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
@@ -695,7 +692,7 @@ export default function SettingsPage() {
             Templates
           </TabsTrigger>
 
-          {/* Tag Manager Tab (সবার জন্য উন্মুক্ত) */}
+          {/* Tag Manager Tab */}
           <TabsTrigger
             value="tags"
             className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
@@ -712,28 +709,28 @@ export default function SettingsPage() {
           <SessionsCard />
         </TabsContent>
 
-        {/* WORKSPACE TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {/* WORKSPACE TAB CONTENT */}
         {isOwner && (
           <TabsContent value="workspace" className="space-y-6">
             <WorkspaceForm />
           </TabsContent>
         )}
 
-        {/* TEAM TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {/* TEAM TAB CONTENT */}
         {isOwner && (
           <TabsContent value="team" className="space-y-6">
             <TeamForm />
           </TabsContent>
         )}
 
-        {/* AI TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {/* AI TAB CONTENT */}
         {isOwner && (
           <TabsContent value="ai" className="space-y-6">
             <AIForm />
           </TabsContent>
         )}
 
-        {/* AI TRAINING (RAG) TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {/* AI TRAINING (RAG) TAB CONTENT */}
         {isOwner && (
           <TabsContent value="kb">
             {!mounted || checkingStatus ? (
@@ -752,7 +749,7 @@ export default function SettingsPage() {
           </TabsContent>
         )}
 
-        {/* WHATSAPP TAB CONTENT (শুধুমাত্র ওনার রেন্ডার করতে পারবে) */}
+        {/* WHATSAPP TAB CONTENT */}
         {isOwner && (
           <TabsContent value="whatsapp">
             {!mounted || checkingStatus ? (
