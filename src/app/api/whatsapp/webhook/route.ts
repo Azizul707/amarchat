@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api' // বাগ ফিক্স: downloadMedia ইমপোর্ট করা হলো
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -246,7 +246,7 @@ const RECIPIENT_STATUS_LADDER = [
   'delivered',
   'read',
   'replied',
-] as const
+ ] as const
 
 function ladderLevel(s: string): number {
   const idx = (RECIPIENT_STATUS_LADDER as readonly string[]).indexOf(s)
@@ -493,19 +493,19 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        const audioRes = await fetch(verifiedUrlData.url, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
+        // বাগ ফিক্স ১: ম্যানুয়াল ফেচ-এর পরিবর্তে প্রোজেক্টের টেস্টেড `downloadMedia` মেথড ব্যবহার করা হলো রিডাইরেক্ট বাগ এড়াতে
+        const downloadResult = await downloadMedia({
+          downloadUrl: verifiedUrlData.url,
+          accessToken,
         })
         
-        if (audioRes.ok) {
-          const arrayBuffer = await audioRes.arrayBuffer()
-          const audioBuffer = Buffer.from(arrayBuffer)
+        if (downloadResult && downloadResult.buffer) {
+          const audioBuffer = Buffer.from(downloadResult.buffer)
           
-          const file = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' })
+          // বাগ ফিক্স ২: মেটা অডিও বাফারকে স্ট্যান্ডার্ড ও নিরাপদ Blob আকারে filename-সহ FormData তে যুক্ত করা হলো
+          const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
           const formData = new FormData()
-          formData.append('file', file)
+          formData.append('file', blob, 'voice.ogg')
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
@@ -522,12 +522,12 @@ async function processMessage(
             contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
           } else {
             const errBody = await whisperRes.json().catch(() => ({}))
-            console.error('[webhook] Whisper transcription API failed:', whisperRes.status, errBody)
+            console.error('[webhook] Whisper transcription API failed:', whisperRes.status, JSON.stringify(errBody))
             contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
             isTranscriptionFailed = true 
           }
         } else {
-          console.error('[webhook] Audio download from Meta failed')
+          console.error('[webhook] Audio download from Meta failed (Buffer is empty)')
           contentText = '[ভয়েস নোটটি ডাউনলোড করা যায়নি]'
           isTranscriptionFailed = true
         }
