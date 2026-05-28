@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Brain, Trash2, Loader2, Plus, Sparkles, BookOpen } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Brain, Trash2, Loader2, Sparkles, BookOpen, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -14,18 +13,24 @@ interface Document {
 }
 
 export default function KnowledgeBaseSettings() {
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [document, setDocument] = useState<Document | null>(null);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [training, setTraining] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
-  const fetchDocuments = useCallback(async () => {
+  const fetchDocument = useCallback(async () => {
     try {
       const res = await fetch("/api/whatsapp/knowledge-base");
-      if (!res.ok) throw new Error("Failed to load documents");
+      if (!res.ok) throw new Error("Failed to load knowledge base");
       const data = await res.json();
-      setDocuments(data || []);
+      if (data) {
+        setDocument(data);
+        setContent(data.content); // এডিটিং সহজ করতে টেক্সটএরিয়াতে ডাটা আগে থেকে বসানো হলো
+      } else {
+        setDocument(null);
+        setContent("");
+      }
     } catch (err) {
       console.error(err);
       toast.error("Could not load your AI knowledge base.");
@@ -35,8 +40,8 @@ export default function KnowledgeBaseSettings() {
   }, []);
 
   useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
+    fetchDocument();
+  }, [fetchDocument]);
 
   const handleTrain = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -58,9 +63,8 @@ export default function KnowledgeBaseSettings() {
         throw new Error(errData?.error || "Training failed");
       }
 
-      toast.success("AI has been successfully trained with new knowledge!");
-      setContent("");
-      fetchDocuments();
+      toast.success("AI has been successfully trained with updated knowledge!");
+      fetchDocument();
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : "Training failed. Please try again.");
@@ -69,22 +73,32 @@ export default function KnowledgeBaseSettings() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    setDeletingId(id);
+  const handleClear = async () => {
+    // বাংলা ভাষায় অসাবধানতাবশত ডিলিট হওয়া রোধ করতে কনফার্মেশন পপ-আপ সেফগার্ড [1.2.7]
+    const userConfirmed = window.confirm(
+      "আপনি কি নিশ্চিত যে আপনি আপনার এআই সেলস অ্যাসিস্ট্যান্টের সমস্ত শেখানো তথ্য (Knowledge Base) সম্পূর্ণ মুছে ফেলতে চান?\n\nসতর্কতা: এই কাজটি আর ফিরিয়ে আনা যাবে না।"
+    );
+
+    if (!userConfirmed) {
+      return; // ইউজার Cancel বা ক্রস দিলে ডিলিট প্রসেস এখানেই বাতিল হয়ে যাবে
+    }
+
+    setClearing(true);
     try {
-      const res = await fetch(`/api/whatsapp/knowledge-base?id=${id}`, {
+      const res = await fetch("/api/whatsapp/knowledge-base", {
         method: "DELETE",
       });
 
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) throw new Error("Clear failed");
 
-      toast.success("Knowledge document removed successfully.");
-      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      toast.success("Knowledge base cleared successfully.");
+      setDocument(null);
+      setContent("");
     } catch (err) {
       console.error(err);
-      toast.error("Could not delete the document.");
+      toast.error("Could not clear the knowledge base.");
     } finally {
-      setDeletingId(null);
+      setClearing(false);
     }
   };
 
@@ -105,12 +119,12 @@ export default function KnowledgeBaseSettings() {
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 space-y-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             <Sparkles className="h-4 w-4 text-violet-500" />
-            Add New Knowledge
+            {document ? "Update Business Knowledge" : "Train New Knowledge"}
           </div>
           <form onSubmit={handleTrain} className="space-y-4">
             <textarea
               required
-              rows={8}
+              rows={10}
               disabled={training}
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -129,60 +143,60 @@ export default function KnowledgeBaseSettings() {
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Train Sales Assistant
+                  <RotateCcw className="h-4 w-4" />
+                  {document ? "Update & Retrain Assistant" : "Train Sales Assistant"}
                 </span>
               )}
             </Button>
           </form>
         </div>
 
-        {/* List Card */}
+        {/* Status/Display Card */}
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 space-y-4 flex flex-col min-h-0">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             <BookOpen className="h-4 w-4 text-violet-500" />
-            Trained Documents ({documents.length})
+            Active Knowledge Base Status
           </div>
 
-          <div className="flex-1 overflow-y-auto max-h-[320px] pr-1 space-y-3 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+          <div className="flex-1 overflow-y-auto max-h-[350px] pr-1 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent flex flex-col justify-between">
             {loading ? (
-              <div className="flex items-center justify-center py-12">
+              <div className="flex items-center justify-center py-12 flex-1">
                 <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
               </div>
-            ) : documents.length === 0 ? (
-              <div className="text-center py-12 text-sm text-slate-500">
-                No custom knowledge added yet. Paste details on the left to train.
+            ) : !document ? (
+              <div className="text-center py-12 text-sm text-slate-500 flex-1 flex flex-col justify-center items-center">
+                <p>No active business knowledge trained yet.</p>
+                <p className="text-xs text-slate-600 mt-1">Paste details on the left and click Train to activate.</p>
               </div>
             ) : (
-              documents.map((doc) => {
-                const timeAgo = formatDistanceToNow(new Date(doc.created_at), { addSuffix: true });
-                return (
-                  <div
-                    key={doc.id}
-                    className="group relative rounded-lg border border-slate-800 bg-slate-950 p-3.5 space-y-2 text-xs hover:border-slate-700 transition-all"
+              <div className="space-y-4 flex flex-col justify-between flex-1">
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-2">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                    Active Trained Knowledge
+                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed break-words whitespace-pre-line">
+                    {document.content}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-800 pt-3 text-[10px] text-slate-500">
+                  <span>Last trained {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}</span>
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    disabled={clearing}
+                    className="inline-flex items-center gap-1 text-red-500 hover:text-red-400 font-bold cursor-pointer disabled:opacity-50"
+                    aria-label="Clear knowledge base"
                   >
-                    <p className="text-slate-300 leading-relaxed break-words whitespace-pre-line pr-6">
-                      {doc.content}
-                    </p>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
-                      <span>Trained {timeAgo}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(doc.id)}
-                        disabled={deletingId === doc.id}
-                        className="text-red-500 hover:text-red-400 p-1 rounded transition-colors"
-                        aria-label="Delete knowledge item"
-                      >
-                        {deletingId === doc.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
+                    {clearing ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Clear Knowledge
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

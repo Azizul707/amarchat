@@ -5,7 +5,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 // নেক্সট.জেএস এবং Vercel এর এপিআই গেট (GET) ক্যাশিং সম্পূর্ণরূপে বন্ধ করার জন্য ডাইনামিক এক্সপোর্ট যুক্ত করা হলো
 export const dynamic = 'force-dynamic'
 
-// POST - Train AI (নলেজ বেস ভেক্টর তৈরি ও সেভ করা)
+// POST - Train AI (strictly 1-to-1 upsert per workspace_id)
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -77,11 +77,35 @@ export async function POST(request: Request) {
     const embeddingData = await embeddingRes.json()
     const embeddingVector = embeddingData.data[0].embedding
 
-    const { error: dbError } = await supabase.from('knowledge_base').insert({
-      workspace_id: profile.workspace_id,
-      content: content,
-      embedding: embeddingVector,
-    })
+    // ১-টু-১ মেকানিজম: আগে থেকে কোনো নলেজ বেস আছে কি না চেক
+    const { data: existingDoc } = await supabase
+      .from('knowledge_base')
+      .select('id')
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
+
+    let dbError = null
+
+    if (existingDoc) {
+      // আগের ডাটা নতুন ডাটা দিয়ে সম্পূর্ণ রিপ্লেস/আপডেট করা হচ্ছে
+      const { error } = await supabase
+        .from('knowledge_base')
+        .update({
+          content: content,
+          embedding: embeddingVector,
+          created_at: new Date().toISOString(),
+        })
+        .eq('workspace_id', profile.workspace_id)
+      dbError = error
+    } else {
+      // নতুন ডাটা ইনসার্ট
+      const { error } = await supabase.from('knowledge_base').insert({
+        workspace_id: profile.workspace_id,
+        content: content,
+        embedding: embeddingVector,
+      })
+      dbError = error
+    }
 
     if (dbError) {
       console.error('Database save failed:', dbError.message)
@@ -95,7 +119,7 @@ export async function POST(request: Request) {
   }
 }
 
-// GET - সুনির্দিষ্ট ওয়ার্কস্পেসের ইতিমধ্যে ট্রেইন্ড হওয়া নলেজ বেসের লিস্ট রিটার্ন করবে
+// GET - সুনির্দিষ্ট ওয়ার্কস্পেসের ১টি ইউনিক ডক রিটার্ন করবে
 export async function GET() {
   try {
     const supabase = await createClient()
@@ -119,34 +143,27 @@ export async function GET() {
       .from('knowledge_base')
       .select('id, content, created_at')
       .eq('workspace_id', profile.workspace_id)
-      .order('created_at', { ascending: false })
+      .maybeSingle() // ১টি ডকই সিলেক্ট করা হচ্ছে
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json(data, { status: 200 })
+    return NextResponse.json(data || null, { status: 200 })
   } catch (err) {
     console.error('Get Knowledge Base Error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-// DELETE - ট্রেইন্ড হওয়া কোনো নির্দিষ্ট নলেজ ডকুমেন্ট মুছে ফেলা
-export async function DELETE(request: Request) {
+// DELETE - সম্পূর্ণ নলেজ বেস ডাটাবেজ থেকে মুছে ফেলা
+export async function DELETE() {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
-
-    if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 })
     }
 
     const { data: profile } = await supabase
@@ -162,8 +179,7 @@ export async function DELETE(request: Request) {
     const { error } = await supabase
       .from('knowledge_base')
       .delete()
-      .eq('id', id)
-      .eq('workspace_id', profile.workspace_id)
+      .eq('workspace_id', profile.workspace_id) // ওনারের সব নলেজ একবারে ক্লিয়ার করবে
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
