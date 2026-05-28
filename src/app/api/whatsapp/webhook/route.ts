@@ -496,12 +496,11 @@ async function processMessage(
         let downloadResult = null
         let attempts = 0
         const maxAttempts = 3
-        const delayMs = 2500 // প্রতিটি ডাউনলোডের মাঝে ২.৫ সেকেন্ড বিরতি
+        const delayMs = 2000 // প্রতিটি ডাউনলোডের মাঝে ২ সেকেন্ড বিরতি
 
-        // বাগ ফিক্স: রেস কন্ডিশন (Race Condition) এড়াতে সিডিএন সিঙ্ক হওয়ার জন্য ডাইনামিক রিট্রাই লুপ
+        // বাগ ফিক্স: রেস কন্ডিশন এড়াতে ডাইনামিক রিট্রাই লুপ
         while (attempts < maxAttempts) {
           attempts++
-          // মেটার সার্ভারকে ডেটা প্রসেস করার সুযোগ দিতে ২.৫ সেকেন্ড ডিলে
           await new Promise((resolve) => setTimeout(resolve, delayMs))
           
           const tempResult = await downloadMedia({
@@ -510,8 +509,8 @@ async function processMessage(
           })
 
           if (tempResult && tempResult.buffer) {
-            // অডিও ফাইলের বাফার সাইজ ৪০০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
-            if (tempResult.buffer.byteLength > 4000) {
+            // বাগ ফিক্স: ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            if (tempResult.buffer.byteLength > 500) {
               downloadResult = tempResult
               break
             } else {
@@ -535,13 +534,18 @@ async function processMessage(
         if (downloadResult && downloadResult.buffer) {
           const audioBuffer = Buffer.from(downloadResult.buffer)
           
-          const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
+          const file = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' })
           const formData = new FormData()
-          formData.append('file', blob, 'voice.ogg')
+          formData.append('file', file)
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
-          const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          // বাগ ফিক্স: কাস্টম এবং ডিক্রিপ্ট করা BYOK এপিআই বেইস ইউআরএল ডাইনামিকালি ব্যবহার করা হচ্ছে
+          const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
+          const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
+          const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
+
+          const whisperRes = await fetch(transcriptionUrl, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${decryptedApiKey}`,
@@ -644,7 +648,7 @@ async function processMessage(
   const shouldTriggerAI = conversation.ai_active && 
     (contentText || message.type === 'image') && 
     !isTranscriptionFailed && 
-    !isFallbackText && // ফলব্যাক টেক্সট গার্ডরেইল এনাবেল্ড করা হলো
+    !isFallbackText && // ফলব্যাক টেক্সট গার্ডরেইল এনাবেল্ড
     decryptedApiKey && 
     config;
 
