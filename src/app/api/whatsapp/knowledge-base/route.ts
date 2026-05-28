@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
-// POST - Train AI (ডাউনলোড এবং ওনারের নিজস্ব ডাইনামিক এপিআই কি ও গেটওয়ে দিয়ে ভেক্টর তৈরি করা)
+// নেক্সট.জেএস এবং Vercel এর এপিআই গেট (GET) ক্যাশিং সম্পূর্ণরূপে বন্ধ করার জন্য ডাইনামিক এক্সপোর্ট যুক্ত করা হলো
+export const dynamic = 'force-dynamic'
+
+// POST - Train AI (নলেজ বেস ভেক্টর তৈরি ও সেভ করা)
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -27,10 +30,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
     }
 
-    // ১. ওনারের সেভ করা whatsapp_config থেকে এনক্রিপ্ট করা এপিআই কি ও কাস্টম বেস ইউআরএল রিট্রাইভ করা
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
-      .select('openai_api_key, ai_base_url') // ai_base_url রিট্রাইভ করা হচ্ছে
+      .select('openai_api_key, ai_base_url')
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
 
@@ -46,21 +48,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to decrypt your OpenAI API Key.' }, { status: 500 })
     }
 
-    // ২. কাস্টমার বা ওনারের সেভ করা কাস্টম এআই বেস ইউআরএল অনুযায়ী এমবেডিংস এপিআই পাথ তৈরি
     const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
     const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
-    const embeddingsUrl = `${sanitizedBaseUrl}/embeddings` // ডাইনামিক এপিআই গেটওয়ে পাথ
+    const embeddingsUrl = `${sanitizedBaseUrl}/embeddings`
 
-    // ৩. কাস্টমার যদি ওপেনরাউটার ব্যবহার করে তবে তারembeddings মডেল নেম অটোমেটিক কনভার্ট হবে
     const embeddingModel = aiBaseUrl.includes('openrouter') 
       ? 'openai/text-embedding-3-small' 
       : 'text-embedding-3-small'
 
-    // ৪. ওনারের নিজস্ব ডাইনামিক এপিআই কি এবং এপিআই এন্ডপয়েন্ট দিয়ে ভেক্টর জেনারেট করা হচ্ছে
     const embeddingRes = await fetch(embeddingsUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${decryptedApiKey}`, // ডিক্রিপ্ট করা কাস্টমার নিজস্ব কি
+        'Authorization': `Bearer ${decryptedApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -78,7 +77,6 @@ export async function POST(request: Request) {
     const embeddingData = await embeddingRes.json()
     const embeddingVector = embeddingData.data[0].embedding
 
-    // ৫. ভেক্টরসহ ডাটাবেজে নলেজ সেভ করা হচ্ছে
     const { error: dbError } = await supabase.from('knowledge_base').insert({
       workspace_id: profile.workspace_id,
       content: content,
