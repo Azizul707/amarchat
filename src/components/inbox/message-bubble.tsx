@@ -164,7 +164,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <audio src={message.media_url} preload="metadata" controls className="max-w-60" />
           ) : (
             <MediaUnavailable label="Audio" />
           )}

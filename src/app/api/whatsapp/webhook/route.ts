@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api' // বাগ ফিক্স: downloadMedia ইমপোর্ট করা হলো
+import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -246,7 +246,7 @@ const RECIPIENT_STATUS_LADDER = [
   'delivered',
   'read',
   'replied',
- ] as const
+] as const
 
 function ladderLevel(s: string): number {
   const idx = (RECIPIENT_STATUS_LADDER as readonly string[]).indexOf(s)
@@ -493,16 +493,48 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        // বাগ ফিক্স ১: ম্যানুয়াল ফেচ-এর পরিবর্তে প্রোজেক্টের টেস্টেড `downloadMedia` মেথড ব্যবহার করা হলো রিডাইরেক্ট বাগ এড়াতে
-        const downloadResult = await downloadMedia({
-          downloadUrl: verifiedUrlData.url,
-          accessToken,
-        })
+        let downloadResult = null
+        let attempts = 0
+        const maxAttempts = 3
+        const delayMs = 2500 // প্রতিটি ডাউনলোডের মাঝে ২.৫ সেকেন্ড বিরতি
+
+        // বাগ ফিক্স: রেস কন্ডিশন (Race Condition) এড়াতে সিডিএন সিঙ্ক হওয়ার জন্য ডাইনামিক রিট্রাই লুপ
+        while (attempts < maxAttempts) {
+          attempts++
+          // মেটার সার্ভারকে ডেটা প্রসেস করার সুযোগ দিতে ২.৫ সেকেন্ড ডিলে
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+          
+          const tempResult = await downloadMedia({
+            downloadUrl: verifiedUrlData.url,
+            accessToken,
+          })
+
+          if (tempResult && tempResult.buffer) {
+            // অডিও ফাইলের বাফার সাইজ ৪০০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            if (tempResult.buffer.byteLength > 4000) {
+              downloadResult = tempResult
+              break
+            } else {
+              console.warn(`[webhook] Audio download attempt ${attempts}: File too small (${tempResult.buffer.byteLength} bytes), retrying...`)
+            }
+          }
+        }
+
+        // যদি ৩ বার প্রচেষ্টার পরও ফাইল ছোট থাকে, তবে অন্তিম বাফারকে ফলব্যাক হিসেবে ব্যবহার করবে
+        if (!downloadResult && attempts >= maxAttempts) {
+          console.warn('[webhook] Audio download exceeded max attempts, fallback to final buffer request')
+          const finalResult = await downloadMedia({
+            downloadUrl: verifiedUrlData.url,
+            accessToken,
+          })
+          if (finalResult && finalResult.buffer) {
+            downloadResult = finalResult
+          }
+        }
         
         if (downloadResult && downloadResult.buffer) {
           const audioBuffer = Buffer.from(downloadResult.buffer)
           
-          // বাগ ফিক্স ২: মেটা অডিও বাফারকে স্ট্যান্ডার্ড ও নিরাপদ Blob আকারে filename-সহ FormData তে যুক্ত করা হলো
           const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
           const formData = new FormData()
           formData.append('file', blob, 'voice.ogg')
@@ -604,9 +636,15 @@ async function processMessage(
     return
   }
 
+  // এআই যেন মেকি বা ফলব্যাক এরর টেক্সটের উত্তর কাস্টমারকে না পাঠায়
+  const isFallbackText = contentText === '[ভয়েস নোটটি খালি ছিল]' || 
+                         contentText === '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]' || 
+                         contentText === '[ভয়েস নোটটি ডাউনলোড করা যায়নি]';
+
   const shouldTriggerAI = conversation.ai_active && 
     (contentText || message.type === 'image') && 
     !isTranscriptionFailed && 
+    !isFallbackText && // ফলব্যাক টেক্সট গার্ডরেইল এনাবেল্ড করা হলো
     decryptedApiKey && 
     config;
 
