@@ -5,19 +5,17 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> } // [id] ফোল্ডার স্ট্রাকচার অনুযায়ী টাইপ পরিবর্তন
+  { params }: { params: Promise<{ mediaId: string }> } // ফোল্ডার নাম [mediaId] অনুযায়ী টাইপ সংশোধন
 ) {
   try {
-    const { id } = await params // params থেকে id সংগ্রহ
+    const { mediaId } = await params // params থেকে mediaId ডিস্ট্রাকচার করা হলো
 
-    if (!id) {
+    if (!mediaId) {
       return NextResponse.json(
         { error: 'Media ID is required' },
         { status: 400 }
       )
     }
-
-    const mediaId = id // এপিআই কলের সুবিধার জন্য mediaId ভেরিয়েবলে রূপান্তর
 
     const supabase = await createClient()
 
@@ -76,7 +74,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400', // ব্রাউজার ক্যাশিং এনাবেল করা হলো
+        'Cache-Control': 'public, max-age=86400',
       },
     })
   } catch (error) {
