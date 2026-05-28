@@ -474,13 +474,11 @@ async function processMessage(
 
   if (message.type === 'audio' && message.audio?.id) {
     try {
-      // getMediaUrl এর রিটার্ন টাইপ স্পষ্টভাবে অবজেক্ট হিসেবে কাস্ট করা হলো [1]
       const verifiedUrlData = (await getMediaUrl({
         mediaId: message.audio.id,
         accessToken,
       })) as { url: string; mimeType: string } | null
 
-      // অবজেক্টের ভেতর .url প্রোপার্টি ভেরিফাই করে ডাউনলোড করা হচ্ছে [1]
       if (verifiedUrlData && verifiedUrlData.url) {
         const audioRes = await fetch(verifiedUrlData.url, {
           headers: {
@@ -560,39 +558,73 @@ async function processMessage(
     return
   }
 
-  if (conversation.ai_active && contentText) {
+  if (conversation.ai_active && (contentText || message.type === 'image')) {
     try {
-      const embedRes = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          input: contentText,
-          model: 'text-embedding-3-small',
-        }),
-      })
+      const { data: config, error: configError } = await supabaseAdmin()
+        .from('whatsapp_config')
+        .select('*')
+        .eq('workspace_id', conversation.workspace_id)
+        .maybeSingle()
+
+      if (configError || !config || !config.openai_api_key) {
+        console.error('[webhook] AI config missing or incomplete:', configError?.message)
+        return
+      }
+
+      const decryptedApiKey = decrypt(config.openai_api_key)
+      if (!decryptedApiKey) {
+        console.error('[webhook] Failed to decrypt OpenAI API Key')
+        return
+      }
+
+      const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
+      const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
+      const embeddingsUrl = `${sanitizedBaseUrl}/embeddings`
+
+      const embeddingModel = aiBaseUrl.includes('openrouter') 
+        ? 'openai/text-embedding-3-small' 
+        : 'text-embedding-3-small'
 
       let matchedContext = ''
-      if (embedRes.ok) {
-        const embedData = await embedRes.json()
-        const queryVector = embedData.data[0].embedding
+      
+      if (contentText) {
+        const embedRes = await fetch(embeddingsUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${decryptedApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            input: contentText,
+            model: embeddingModel,
+          }),
+        })
 
-        const { data: ragDocs, error: ragError } = await supabaseAdmin()
-          .rpc('match_knowledge_base', {
-            query_embedding: queryVector,
-            match_threshold: 0.3,
-            match_count: 3,
-            p_workspace_id: conversation.workspace_id,
-          })
+        if (embedRes.ok) {
+          const embedData = await embedRes.json()
+          const queryVector = embedData.data[0].embedding
 
-        if (!ragError && ragDocs) {
-          matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+          const { data: ragDocs, error: ragError } = await supabaseAdmin()
+            .rpc('match_knowledge_base', {
+              query_embedding: queryVector,
+              match_threshold: 0.3,
+              match_count: 3,
+              p_workspace_id: conversation.workspace_id,
+            })
+
+          if (!ragError && ragDocs) {
+            matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+          }
         }
       }
 
-      const userMessageContent: MessageContent[] = [{ type: 'text', text: contentText }]
+      const userMessageContent: MessageContent[] = []
+      if (contentText) {
+        userMessageContent.push({ type: 'text', text: contentText })
+      } else if (message.type === 'image') {
+        userMessageContent.push({ type: 'text', text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটিতে কী আছে তা দেখুন এবং বাংলায় সাহায্য করুন।' })
+      }
+
       if (message.type === 'image' && mediaUrl) {
         userMessageContent.push({
           type: 'image_url',
@@ -600,14 +632,24 @@ async function processMessage(
         })
       }
 
-      const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      const chatUrl = `${sanitizedBaseUrl}/chat/completions`
+      const aiModel = config.ai_model || 'gpt-4o-mini'
+
+      const customHeaders: HeadersInit = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${decryptedApiKey}`
+      }
+
+      if (aiBaseUrl.includes('openrouter')) {
+        customHeaders['HTTP-Referer'] = 'https://amarchat.vercel.app'
+        customHeaders['X-Title'] = 'amarchat CRM'
+      }
+
+      const gptRes = await fetch(chatUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: customHeaders,
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model: aiModel,
           messages: [
             {
               role: 'system',
@@ -624,6 +666,8 @@ async function processMessage(
               content: userMessageContent
             }
           ],
+          max_tokens: 400,
+          temperature: 0.7,
         }),
       })
 
@@ -641,13 +685,16 @@ async function processMessage(
           status: 'sent',
           created_at: new Date().toISOString(),
         })
+      } else {
+        const errBody = await gptRes.json().catch(() => ({}))
+        console.error('[webhook] AI completions API failed:', errBody)
       }
     } catch (err) {
-      console.error('[webhook] GPT-4o execution or send failed:', err)
+      console.error('[webhook] GPT/AI execution or send failed:', err)
     }
   }
 
-  const { error: convError = null } = await supabaseAdmin()
+  const { error: convError } = await supabaseAdmin()
     .from('conversations')
     .update({
       last_message_text: contentText || `[${message.type}]`,
@@ -661,6 +708,7 @@ async function processMessage(
     console.error('Error updating conversation:', convError)
   }
 
+  // ফিক্স: ৭১৬ নম্বর লাইনে থাকা আনডিসলভড contactId কে সঠিক ভ্যারিয়েবল contactRecord.id দিয়ে রিপ্লেস করা হলো [1]
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
   const inboundText = contentText ?? message.text?.body ?? ''
