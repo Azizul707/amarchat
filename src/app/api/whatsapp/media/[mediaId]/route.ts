@@ -31,16 +31,30 @@ export async function GET(
       )
     }
 
-    // Fetch and decrypt WhatsApp config
+    // এজেন্টের প্রোফাইল থেকে workspace_id সংগ্রহ করা হচ্ছে [1]
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('workspace_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (profileError || !profile?.workspace_id) {
+      return NextResponse.json(
+        { error: 'Workspace not found' },
+        { status: 404 }
+      )
+    }
+
+    // বাগ ফিক্স: এজেন্টের নিজের ইউজার আইডির বদলে ওয়ার্কস্পেস আইডি দিয়ে সিকিউরড কনফিগ রিড করা হচ্ছে [1]
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('user_id', user.id)
-      .single()
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
 
     if (configError || !config) {
       return NextResponse.json(
-        { error: 'WhatsApp not configured' },
+        { error: 'WhatsApp not configured for this workspace' },
         { status: 400 }
       )
     }

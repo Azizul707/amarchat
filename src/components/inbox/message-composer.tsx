@@ -5,7 +5,6 @@ import { Send, LayoutTemplate, Paperclip, Loader2, Mic, Square, Trash2 } from "l
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ReplyQuote } from "./reply-quote";
-// সুপাবেস এবং সোনার টোস্ট ইম্পোর্ট
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
@@ -41,17 +40,15 @@ export function MessageComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const shouldSendAudioRef = useRef<boolean>(true); // ভয়েস ক্যানসেল চেক করার জন্য
+  const shouldSendAudioRef = useRef<boolean>(true); // ভয়েস ক্যানসেল চেক
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    // Max 4 lines (~96px)
     el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
   }, []);
 
-  // HTML5 Canvas ব্যবহার করে ইমেজ কম্প্রেশন
   const compressImage = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -90,12 +87,12 @@ export function MessageComposer({
     });
   };
 
-  // সুপাবেসে ফাইল আপলোড ও মেটা এপিআই কল ড্রাইভার
   const uploadAndSend = async (fileToUpload: File | Blob, messageType: 'image' | 'video' | 'audio' | 'document', originalName?: string) => {
     try {
       setUploading(true);
       let finalFile = fileToUpload;
-      let finalName = originalName || (fileToUpload instanceof File ? fileToUpload.name : `voice-note-${Date.now()}.ogg`);
+      // ফিক্স: 'let' এর জায়গায় 'const' ব্যবহার করে লিন্টার এরর সংশোধন করা হলো [1.1.2]
+      const finalName = originalName || (fileToUpload instanceof File ? fileToUpload.name : `voice-note-${Date.now()}.webm`);
 
       if (messageType === 'image' && fileToUpload instanceof File) {
         toast.info("Compressing image for instant delivery...");
@@ -211,7 +208,19 @@ export function MessageComposer({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      
+      let mimeType = 'audio/webm';
+      let extension = 'webm';
+      
+      if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+        extension = 'webm';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+        extension = 'm4a';
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
       shouldSendAudioRef.current = true;
@@ -225,10 +234,10 @@ export function MessageComposer({
       recorder.onstop = async () => {
         if (!shouldSendAudioRef.current) return;
         
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg; codecs=opus' });
-        const audioFile = new File([audioBlob], `voice-note-${Date.now()}.ogg`, { type: 'audio/ogg' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const audioFile = new File([audioBlob], `voice-note-${Date.now()}.${extension}`, { type: mimeType });
         
-        await uploadAndSend(audioFile, 'audio', `voice-note-${Date.now()}.ogg`);
+        await uploadAndSend(audioFile, 'audio', `voice-note-${Date.now()}.${extension}`);
       };
 
       recorder.start();
@@ -287,7 +296,6 @@ export function MessageComposer({
       )}
 
       <div className="flex items-end gap-2">
-        {/* হিডেন ফাইল ইনপুট */}
         <input 
           type="file" 
           ref={fileInputRef} 
@@ -296,7 +304,6 @@ export function MessageComposer({
           accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         />
 
-        {/* টেমপ্লেট বাটন */}
         <Button
           variant="ghost"
           size="sm"
@@ -308,7 +315,6 @@ export function MessageComposer({
           <LayoutTemplate className="h-4 w-4" />
         </Button>
 
-        {/* পেপারক্লিপ বাটন */}
         <Button
           variant="ghost"
           size="sm"
@@ -325,7 +331,6 @@ export function MessageComposer({
           )}
         </Button>
 
-        {/* অডিও রেকর্ডার বাটন প্যানেল (লুসিড আইকনগুলোর RLS প্রপ এরর ফিক্স করা হয়েছে) [1.2.7, 1.2.8] */}
         {isRecording ? (
           <div className="flex h-9 items-center gap-3 px-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 animate-pulse shrink-0">
             <span className="cursor-pointer shrink-0" onClick={stopRecording} title="Stop and Send">
@@ -350,7 +355,6 @@ export function MessageComposer({
           </Button>
         )}
 
-        {/* টেক্সট এরিয়া ইনপুট */}
         <textarea
           ref={textareaRef}
           value={text}
