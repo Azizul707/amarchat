@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { decrypt } from '@/lib/whatsapp/encryption' // ডিক্রিপশন মেথড ইম্পোর্ট করা হলো
 
-// POST - Train AI (নলেজ বেস যুক্ত করা এবং ভেক্টর তৈরি করা)
+// POST - Train AI (ডাউনলোড এবং ওনারের নিজস্ব এপিআই কি দিয়ে ভেক্টর তৈরি করা)
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -26,10 +27,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
     }
 
+    // ১. ওনারের সেভ করা সিকিউরড whatsapp_config থেকে এনক্রিপ্ট করা এপিআই কি রিট্রাইভ করা হচ্ছে
+    const { data: config, error: configError } = await supabase
+      .from('whatsapp_config')
+      .select('openai_api_key')
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
+
+    if (configError || !config || !config.openai_api_key) {
+      return NextResponse.json({ 
+        error: 'OpenAI API Key is not configured. Please set your API Key in the AI Chatbot settings tab first.' 
+      }, { status: 400 })
+    }
+
+    // ২. ওনারের এপিআই কি-টি ব্যাকএন্ডে ডিক্রিপ্ট করা হচ্ছে
+    const decryptedApiKey = decrypt(config.openai_api_key)
+
+    if (!decryptedApiKey) {
+      return NextResponse.json({ error: 'Failed to decrypt your OpenAI API Key.' }, { status: 500 })
+    }
+
+    // ৩. ওনারের নিজস্ব এপিআই কি দিয়ে OpenAI text-embedding-3-small এ ভেক্টর জেনারেট করা হচ্ছে
     const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${decryptedApiKey}`, // ডিক্রিপ্ট করা নিজস্ব কিটি পাস করা হলো
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -47,6 +69,7 @@ export async function POST(request: Request) {
     const embeddingData = await embeddingRes.json()
     const embeddingVector = embeddingData.data[0].embedding
 
+    // ৪. ভেক্টরসহ ডাটাবেজে নলেজ সেভ করা হচ্ছে
     const { error: dbError } = await supabase.from('knowledge_base').insert({
       workspace_id: profile.workspace_id,
       content: content,
@@ -133,7 +156,7 @@ export async function DELETE(request: Request) {
       .from('knowledge_base')
       .delete()
       .eq('id', id)
-      .eq('workspace_id', profile.workspace_id) // এজেন্টরা যাতে অন্য ওয়ার্কস্পেসের ডাটা ডিলিট করতে না পারে
+      .eq('workspace_id', profile.workspace_id)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
