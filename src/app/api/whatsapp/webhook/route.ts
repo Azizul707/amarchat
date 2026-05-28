@@ -468,11 +468,22 @@ async function processMessage(
     return
   }
 
+  // ফিক্স ১: এআই এপিআই কি ও ওনার কনফিগ কুয়েরি লজিক শুরুতেই রিট্রাইভ করা হলো
+  // এটি ভয়েস নোট (Whisper) এবং চ্যাট কমপ্লিশন (GPT-4o) উভয় ব্লকে ব্যবহৃত হবে
+  const { data: config, error: configError } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('*')
+    .eq('workspace_id', conversation.workspace_id)
+    .maybeSingle()
+
+  const decryptedApiKey = config && config.openai_api_key ? decrypt(config.openai_api_key) : null
+
   let contentText: string | null = null
   let mediaUrl: string | null = null
   let mediaType: string | null = null
+  let imageBase64: string | null = null // GPT-4o ভিশনের জন্য বেস৬৪ ইমেজ ট্র্যাকার
 
-  if (message.type === 'audio' && message.audio?.id) {
+  if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
     try {
       const verifiedUrlData = (await getMediaUrl({
         mediaId: message.audio.id,
@@ -502,7 +513,8 @@ async function processMessage(
         const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            // ওনারের নিজস্ব ডিক্রিপ্ট করা কি দিয়ে এপিআই কল হচ্ছে (কোনো প্ল্যাটফর্ম কি না)
+            'Authorization': `Bearer ${decryptedApiKey}`,
           },
           body: formData,
         })
@@ -516,6 +528,33 @@ async function processMessage(
     } catch (err) {
       console.error('[webhook] Whisper transcription failed:', err)
       contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
+    }
+  } else if (message.type === 'image' && message.image?.id) {
+    // ফিক্স ২: মেটা ইমেজ ডাউনলোড লজিক এবং সরাসরি Base64 কনভার্সন
+    // ইমেজটি ডাউনলোড করে Base64 ডেটাতে কনভার্ট করা হচ্ছে যেন আমেরিকার জিপিটি সার্ভার সরাসরি ছবিটি দেখতে পারে
+    try {
+      const verifiedUrlData = (await getMediaUrl({
+        mediaId: message.image.id,
+        accessToken,
+      })) as { url: string; mimeType: string } | null
+
+      if (verifiedUrlData && verifiedUrlData.url) {
+        const imgRes = await fetch(verifiedUrlData.url, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        })
+
+        if (imgRes.ok) {
+          const arrayBuffer = await imgRes.arrayBuffer()
+          const buffer = Buffer.from(arrayBuffer)
+          imageBase64 = `data:${verifiedUrlData.mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
+          mediaUrl = `/api/whatsapp/media/${message.image.id}` // UI তে দেখানোর জন্য লোকাল লিঙ্ক
+          contentText = message.image.caption || null
+        }
+      }
+    } catch (err) {
+      console.error('[webhook] Image download for vision failed:', err)
     }
   } else {
     const parsed = await parseMessageContent(message, accessToken)
@@ -558,25 +597,9 @@ async function processMessage(
     return
   }
 
-  if (conversation.ai_active && (contentText || message.type === 'image')) {
+  // কাস্টমার যদি ক্যাপশন ছাড়া শুধু ছবিও পাঠায়, তাও এআই অটো-রেসপন্স ট্রিগার হবে
+  if (conversation.ai_active && (contentText || message.type === 'image') && decryptedApiKey && config) {
     try {
-      const { data: config, error: configError } = await supabaseAdmin()
-        .from('whatsapp_config')
-        .select('*')
-        .eq('workspace_id', conversation.workspace_id)
-        .maybeSingle()
-
-      if (configError || !config || !config.openai_api_key) {
-        console.error('[webhook] AI config missing or incomplete:', configError?.message)
-        return
-      }
-
-      const decryptedApiKey = decrypt(config.openai_api_key)
-      if (!decryptedApiKey) {
-        console.error('[webhook] Failed to decrypt OpenAI API Key')
-        return
-      }
-
       const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
       const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
       const embeddingsUrl = `${sanitizedBaseUrl}/embeddings`
@@ -618,6 +641,7 @@ async function processMessage(
         }
       }
 
+      // জিপিটি-৪ও ভিশন মাল্টিমোডাল ইনপুট তৈরিকরণ
       const userMessageContent: MessageContent[] = []
       if (contentText) {
         userMessageContent.push({ type: 'text', text: contentText })
@@ -625,10 +649,11 @@ async function processMessage(
         userMessageContent.push({ type: 'text', text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটিতে কী আছে তা দেখুন এবং বাংলায় সাহায্য করুন।' })
       }
 
-      if (message.type === 'image' && mediaUrl) {
+      // কাস্টমার ছবি পাঠালে এবং সফলভাবে Base64 জেনারেট হলে সেটি রিকোয়েস্টে পাঠানো হচ্ছে
+      if (message.type === 'image' && imageBase64) {
         userMessageContent.push({
           type: 'image_url',
-          image_url: { url: mediaUrl },
+          image_url: { url: imageBase64 }, // direct base64 data url
         })
       }
 
@@ -641,7 +666,7 @@ async function processMessage(
       }
 
       if (aiBaseUrl.includes('openrouter')) {
-        customHeaders['HTTP-Referer'] = 'https://amarchat.vercel.app'
+        customHeaders['HTTP-Referer'] = 'https://www.amarchat.xyz'
         customHeaders['X-Title'] = 'amarchat CRM'
       }
 
@@ -654,7 +679,7 @@ async function processMessage(
             {
               role: 'system',
               content: `You are "Lamia", an expert, highly polite, and extremely persuasive sales executive for this business. 
-              Always speak in a friendly Bangla/Banglish blend, using respectful terms like "Apu" or "Bhaiya".
+              Always speak in a friendly Bangla/Banglish blend, using respectful terms like "সম্মানিত ক্রেতা".
               Provide discount packages or combo offers if the customer negotiates or thinks the price is high.
               Use this business knowledge base to answer perfectly and close the sale:
               ---------------------
@@ -708,7 +733,7 @@ async function processMessage(
     console.error('Error updating conversation:', convError)
   }
 
-  // ফিক্স: ৭১৬ নম্বর লাইনে থাকা আনডিসলভড contactId কে সঠিক ভ্যারিয়েবল contactRecord.id দিয়ে রিপ্লেস করা হলো [1]
+  // ফিক্স ৩: ৭১৬ লাইনের contactId বাগ সমাধান
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
   const inboundText = contentText ?? message.text?.body ?? ''
