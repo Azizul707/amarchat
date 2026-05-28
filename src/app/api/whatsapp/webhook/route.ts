@@ -469,7 +469,6 @@ async function processMessage(
   }
 
   // ফিক্স ১: এআই এপিআই কি ও ওনার কনফিগ কুয়েরি লজিক শুরুতেই রিট্রাইভ করা হলো
-  // এটি ভয়েস নোট (Whisper) এবং চ্যাট কমপ্লিশন (GPT-4o) উভয় ব্লকে ব্যবহৃত হবে
   const { data: config, error: configError } = await supabaseAdmin()
     .from('whatsapp_config')
     .select('*')
@@ -484,6 +483,9 @@ async function processMessage(
   let imageBase64: string | null = null // GPT-4o ভিশনের জন্য বেস৬৪ ইমেজ ট্র্যাকার
 
   if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
+    // বাগ ফিক্স ১: ডাউনলোড বা এপিআই ফেইল করলেও যেন ইনবক্সে অডিও প্লেয়ারটি থাকে, তাই আগে থেকেই প্রক্সি লিঙ্ক অ্যাসাইন করা হলো
+    mediaUrl = `/api/whatsapp/media/${message.audio.id}`
+    
     try {
       const verifiedUrlData = (await getMediaUrl({
         mediaId: message.audio.id,
@@ -497,32 +499,34 @@ async function processMessage(
           },
         })
         
-        if (!audioRes.ok) {
-          throw new Error(`Media download failed with status: ${audioRes.status}`)
-        }
+        if (audioRes.ok) {
+          const arrayBuffer = await audioRes.arrayBuffer()
+          const audioBuffer = Buffer.from(arrayBuffer)
+          
+          const formData = new FormData()
+          const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
+          formData.append('file', blob, 'voice.ogg')
+          formData.append('model', 'whisper-1')
+          formData.append('language', 'bn')
 
-        const arrayBuffer = await audioRes.arrayBuffer()
-        const audioBuffer = Buffer.from(arrayBuffer)
-        
-        const formData = new FormData()
-        const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
-        formData.append('file', blob, 'voice.ogg')
-        formData.append('model', 'whisper-1')
-        formData.append('language', 'bn')
+          const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${decryptedApiKey}`,
+            },
+            body: formData,
+          })
 
-        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: {
-            // ওনারের নিজস্ব ডিক্রিপ্ট করা কি দিয়ে এপিআই কল হচ্ছে (কোনো প্ল্যাটফর্ম কি না)
-            'Authorization': `Bearer ${decryptedApiKey}`,
-          },
-          body: formData,
-        })
-
-        if (whisperRes.ok) {
-          const transData = await whisperRes.json()
-          contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
-          mediaUrl = `/api/whatsapp/media/${message.audio.id}`
+          if (whisperRes.ok) {
+            const transData = await whisperRes.json()
+            contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
+          } else {
+            console.error('[webhook] Whisper transcription API failed with status:', whisperRes.status)
+            contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
+          }
+        } else {
+          console.error('[webhook] Audio download from Meta failed')
+          contentText = '[ভয়েস নোটটি ডাউনলোড করা যায়নি]'
         }
       }
     } catch (err) {
@@ -530,8 +534,9 @@ async function processMessage(
       contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
     }
   } else if (message.type === 'image' && message.image?.id) {
-    // ফিক্স ২: মেটা ইমেজ ডাউনলোড লজিক এবং সরাসরি Base64 কনভার্সন
-    // ইমেজটি ডাউনলোড করে Base64 ডেটাতে কনভার্ট করা হচ্ছে যেন আমেরিকার জিপিটি সার্ভার সরাসরি ছবিটি দেখতে পারে
+    // বাগ ফিক্স ২: কোনো ধাপে ইমেজ বা ভিশন এরর হলেও যেন ইনবক্সে ইমেজের লোকাল লিঙ্কটি নষ্ট না হয়
+    mediaUrl = `/api/whatsapp/media/${message.image.id}`
+    
     try {
       const verifiedUrlData = (await getMediaUrl({
         mediaId: message.image.id,
@@ -549,7 +554,6 @@ async function processMessage(
           const arrayBuffer = await imgRes.arrayBuffer()
           const buffer = Buffer.from(arrayBuffer)
           imageBase64 = `data:${verifiedUrlData.mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
-          mediaUrl = `/api/whatsapp/media/${message.image.id}` // UI তে দেখানোর জন্য লোকাল লিঙ্ক
           contentText = message.image.caption || null
         }
       }
@@ -778,7 +782,9 @@ async function parseMessageContent(
         `Failed to verify media ${mediaId} with Meta:`,
         error instanceof Error ? error.message : error
       )
-      return null
+      // বাগ ফিক্স ৩: মেটা এপিআই কল যদি সাময়িকভাবে ব্যর্থও হয়, ডাটাবেজে ইউআরএল নাল না করে লোকাল প্রক্সি পাথটি রিটার্ন করা হচ্ছে 
+      // যেন পরবর্তীতে ব্রাউজার থেকে রিকোয়েস্ট সফল হতে পারে
+      return `/api/whatsapp/media/${mediaId}`
     }
   }
 

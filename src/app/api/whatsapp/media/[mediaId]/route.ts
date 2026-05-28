@@ -5,17 +5,19 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ mediaId: string }> }
+  { params }: { params: Promise<{ id: string }> } // [id] ফোল্ডার স্ট্রাকচার অনুযায়ী টাইপ পরিবর্তন
 ) {
   try {
-    const { mediaId } = await params
+    const { id } = await params // params থেকে id সংগ্রহ
 
-    if (!mediaId) {
+    if (!id) {
       return NextResponse.json(
         { error: 'Media ID is required' },
         { status: 400 }
       )
     }
+
+    const mediaId = id // এপিআই কলের সুবিধার জন্য mediaId ভেরিয়েবলে রূপান্তর
 
     const supabase = await createClient()
 
@@ -31,7 +33,7 @@ export async function GET(
       )
     }
 
-    // এজেন্টের প্রোফাইল থেকে workspace_id সংগ্রহ করা হচ্ছে [1]
+    // এজেন্টের প্রোফাইল থেকে workspace_id সংগ্রহ করা হচ্ছে
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('workspace_id')
@@ -45,7 +47,7 @@ export async function GET(
       )
     }
 
-    // বাগ ফিক্স: এজেন্টের নিজের ইউজার আইডির বদলে ওয়ার্কস্পেস আইডি দিয়ে সিকিউরড কনফিগ রিড করা হচ্ছে [1]
+    // এজেন্টের নিজের ইউজার আইডির বদলে ওয়ার্কস্পেস আইডি দিয়ে সিকিউরড কনফিগ রিড করা হচ্ছে
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -74,7 +76,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
+        'Cache-Control': 'public, max-age=86400', // ব্রাউজার ক্যাশিং এনাবেল করা হলো
       },
     })
   } catch (error) {
