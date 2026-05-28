@@ -468,7 +468,6 @@ async function processMessage(
     return
   }
 
-  // ফিক্স ১: এআই এপিআই কি ও ওনার কনফিগ কুয়েরি লজিক শুরুতেই রিট্রাইভ করা হলো
   const { data: config, error: configError } = await supabaseAdmin()
     .from('whatsapp_config')
     .select('*')
@@ -480,10 +479,11 @@ async function processMessage(
   let contentText: string | null = null
   let mediaUrl: string | null = null
   let mediaType: string | null = null
-  let imageBase64: string | null = null // GPT-4o ভিশনের জন্য বেস৬৪ ইমেজ ট্র্যাকার
+  let imageBase64: string | null = null
+  
+  let isTranscriptionFailed = false 
 
   if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
-    // বাগ ফিক্স ১: ডাউনলোড বা এপিআই ফেইল করলেও যেন ইনবক্সে অডিও প্লেয়ারটি থাকে, তাই আগে থেকেই প্রক্সি লিঙ্ক অ্যাসাইন করা হলো
     mediaUrl = `/api/whatsapp/media/${message.audio.id}`
     
     try {
@@ -503,9 +503,9 @@ async function processMessage(
           const arrayBuffer = await audioRes.arrayBuffer()
           const audioBuffer = Buffer.from(arrayBuffer)
           
+          const file = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' })
           const formData = new FormData()
-          const blob = new Blob([audioBuffer], { type: 'audio/ogg' })
-          formData.append('file', blob, 'voice.ogg')
+          formData.append('file', file)
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
@@ -521,20 +521,23 @@ async function processMessage(
             const transData = await whisperRes.json()
             contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
           } else {
-            console.error('[webhook] Whisper transcription API failed with status:', whisperRes.status)
+            const errBody = await whisperRes.json().catch(() => ({}))
+            console.error('[webhook] Whisper transcription API failed:', whisperRes.status, errBody)
             contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
+            isTranscriptionFailed = true 
           }
         } else {
           console.error('[webhook] Audio download from Meta failed')
           contentText = '[ভয়েস নোটটি ডাউনলোড করা যায়নি]'
+          isTranscriptionFailed = true
         }
       }
     } catch (err) {
       console.error('[webhook] Whisper transcription failed:', err)
       contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
+      isTranscriptionFailed = true
     }
   } else if (message.type === 'image' && message.image?.id) {
-    // বাগ ফিক্স ২: কোনো ধাপে ইমেজ বা ভিশন এরর হলেও যেন ইনবক্সে ইমেজের লোকাল লিঙ্কটি নষ্ট না হয়
     mediaUrl = `/api/whatsapp/media/${message.image.id}`
     
     try {
@@ -601,8 +604,13 @@ async function processMessage(
     return
   }
 
-  // কাস্টমার যদি ক্যাপশন ছাড়া শুধু ছবিও পাঠায়, তাও এআই অটো-রেসপন্স ট্রিগার হবে
-  if (conversation.ai_active && (contentText || message.type === 'image') && decryptedApiKey && config) {
+  const shouldTriggerAI = conversation.ai_active && 
+    (contentText || message.type === 'image') && 
+    !isTranscriptionFailed && 
+    decryptedApiKey && 
+    config;
+
+  if (shouldTriggerAI) {
     try {
       const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
       const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
@@ -645,7 +653,6 @@ async function processMessage(
         }
       }
 
-      // জিপিটি-৪ও ভিশন মাল্টিমোডাল ইনপুট তৈরিকরণ
       const userMessageContent: MessageContent[] = []
       if (contentText) {
         userMessageContent.push({ type: 'text', text: contentText })
@@ -653,11 +660,10 @@ async function processMessage(
         userMessageContent.push({ type: 'text', text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটিতে কী আছে তা দেখুন এবং বাংলায় সাহায্য করুন।' })
       }
 
-      // কাস্টমার ছবি পাঠালে এবং সফলভাবে Base64 জেনারেট হলে সেটি রিকোয়েস্টে পাঠানো হচ্ছে
       if (message.type === 'image' && imageBase64) {
         userMessageContent.push({
           type: 'image_url',
-          image_url: { url: imageBase64 }, // direct base64 data url
+          image_url: { url: imageBase64 },
         })
       }
 
@@ -682,13 +688,27 @@ async function processMessage(
           messages: [
             {
               role: 'system',
-              content: `You are "Lamia", an expert, highly polite, and extremely persuasive sales executive for this business. 
-              Always speak in a friendly Bangla/Banglish blend, using respectful terms like "সম্মানিত ক্রেতা".
-              Provide discount packages or combo offers if the customer negotiates or thinks the price is high.
-              Use this business knowledge base to answer perfectly and close the sale:
-              ---------------------
-              ${matchedContext || 'No specific knowledge base matched. Rely on general warm customer support.'}
-              ---------------------`
+              content: `You are "Lamia", an expert, highly polite, and professional sales and support assistant representing this specific business.
+
+CRITICAL RULE FOR MULTI-TENANT SAAS ISOLATION:
+Your entire identity, scope of work, and product catalog are STRICTLY limited to the provided "BUSINESS KNOWLEDGE BASE" below. You must never assume, invent, or hallucinate any services, products, or offers that are not explicitly mentioned in the knowledge base.
+
+1. SCOPE OF ASSISTANCE:
+- You must carefully analyze the customer's query or sent image against the "BUSINESS KNOWLEDGE BASE".
+- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed in the knowledge base (e.g., sending a food picture like sweets/rosogolla to a seed/agricultural business, or asking about electronics at a clothing shop), you MUST politely and gently decline. Clarify in friendly Bangla that this business only deals in [Extract and state the main business scope from the knowledge base] and you cannot assist with other items.
+- Never praise, negotiate, or confirm orders for products outside the knowledge base.
+
+2. IN-SCOPE SALES & SUPPORT:
+- If the request aligns with the knowledge base, be highly persuasive and friendly. Speak in a warm Bangla/Banglish blend, using respectful terms like "সম্মানিত ক্রেতা".
+- Provide clear answers, assist in closing the sale, and offer any discount/combo structures if documented in the knowledge base.
+
+3. FALLBACK WHEN KNOWLEDGE BASE IS EMPTY:
+- If the "BUSINESS KNOWLEDGE BASE" section below is empty or has no information, do not offer general warm support for random topics. Politely state that you are the automated assistant for this business, and ask them how you can help them regarding this business specifically, without making up fake products or services.
+
+BUSINESS KNOWLEDGE BASE:
+---------------------
+${matchedContext || 'No specific business information is configured yet.'}
+---------------------`
             },
             {
               role: 'user',
@@ -737,7 +757,6 @@ async function processMessage(
     console.error('Error updating conversation:', convError)
   }
 
-  // ফিক্স ৩: ৭১৬ লাইনের contactId বাগ সমাধান
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
   const inboundText = contentText ?? message.text?.body ?? ''
@@ -782,8 +801,6 @@ async function parseMessageContent(
         `Failed to verify media ${mediaId} with Meta:`,
         error instanceof Error ? error.message : error
       )
-      // বাগ ফিক্স ৩: মেটা এপিআই কল যদি সাময়িকভাবে ব্যর্থও হয়, ডাটাবেজে ইউআরএল নাল না করে লোকাল প্রক্সি পাথটি রিটার্ন করা হচ্ছে 
-      // যেন পরবর্তীতে ব্রাউজার থেকে রিকোয়েস্ট সফল হতে পারে
       return `/api/whatsapp/media/${mediaId}`
     }
   }
