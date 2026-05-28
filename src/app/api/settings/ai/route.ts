@@ -1,176 +1,127 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { decrypt } from '@/lib/whatsapp/encryption'
-import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils'
+import { createClient } from '@/lib/supabase/server'
+import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-export async function POST(request: Request) {
+// GET - এআই কনফিগারেশন রিড করা (শুধুমাত্র এপ্রুভড ওনার ডিক্রিপ্ট করা কি দেখতে পাবেন)
+export async function GET() {
   try {
-    const secretHeader = request.headers.get('x-webhook-secret')
-    if (secretHeader !== process.env.WEBHOOK_SECRET_KEY) {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await request.json()
-    const { record, type, table } = body
-
-    if (type !== 'INSERT' || table !== 'messages' || record.sender_type !== 'customer') {
-      return NextResponse.json({ success: true, message: 'Ignored non-customer insert' })
-    }
-
-    const conversationId = record.conversation_id
-    const customerMessageText = record.content_text
-
-    if (!conversationId || !customerMessageText) {
-      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
-    }
-
-    const { data: conversation, error: convError } = await supabaseAdmin
-      .from('conversations')
-      .select('*, contact:contacts(*)')
-      .eq('id', conversationId)
+    // ওনার ভেরিফিকেশন (is_approved === true চেক)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id, is_approved')
+      .eq('user_id', user.id)
       .maybeSingle()
 
-    if (convError || !conversation || !conversation.ai_active) {
-      return NextResponse.json({ success: true, message: 'AI is disabled for this conversation.' })
+    if (!profile || !profile.is_approved) {
+      return NextResponse.json({ error: 'Unauthorized: Only approved owners can access AI settings' }, { status: 401 })
     }
 
-    const contact = conversation.contact
-    if (!contact?.phone) {
-      return NextResponse.json({ error: 'Contact phone not found' }, { status: 400 })
-    }
-
-    const { data: config, error: configError } = await supabaseAdmin
+    const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('user_id', conversation.user_id)
+      .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
 
-    if (configError || !config || !config.openai_api_key) {
-      return NextResponse.json({ error: 'AI is not configured by the workspace owner.' }, { status: 400 })
+    if (configError) {
+      return NextResponse.json({ error: configError.message }, { status: 500 })
     }
 
-    const decryptedApiKey = decrypt(config.openai_api_key)
-    const aiPrompt = config.ai_prompt || 'You are a helpful customer service assistant.'
-    const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
-    const aiModel = config.ai_model || 'gpt-4o-mini'
-
-    const { data: history, error: historyError } = await supabaseAdmin
-      .from('messages')
-      .select('sender_type, content_text')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(10)
-
-    if (historyError) {
-      console.error('Failed to fetch conversation history:', historyError)
+    if (!config) {
+      return NextResponse.json({}, { status: 200 })
     }
 
-    const chatMemory = (history || [])
-      .reverse()
-      .map((m) => ({
-        role: m.sender_type === 'customer' ? 'user' : 'assistant',
-        content: m.content_text || '',
-      }))
+    // এপিআই কি ডিক্রিপ্ট করে পাঠানো হচ্ছে (শুধুমাত্র এপ্রুভড ওনার ব্রাউজারে দেখতে পাবেন)
+    const decryptedApiKey = config.openai_api_key ? decrypt(config.openai_api_key) : ''
 
-    const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
-    const apiUrl = `${sanitizedBaseUrl}/chat/completions`
+    return NextResponse.json({
+      apiKey: decryptedApiKey,
+      prompt: config.ai_prompt || '',
+      baseUrl: config.ai_base_url || '',
+      model: config.ai_model || '',
+    }, { status: 200 })
+  } catch (err) {
+    console.error('GET AI Settings Error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
 
-    const customHeaders: HeadersInit = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${decryptedApiKey}`
+// POST - এআই কনফিগারেশন সেভ/আপডেট করা (শুধুমাত্র এপ্রুভড ওনার ডাটা সেভ করতে পারবেন)
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (aiBaseUrl.includes('openrouter')) {
-      customHeaders['HTTP-Referer'] = 'https://amarchat.vercel.app'
-      customHeaders['X-Title'] = 'amarchat CRM'
+    // ওনার ভেরিফিকেশন (is_approved === true চেক)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('workspace_id, is_approved')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!profile || !profile.is_approved) {
+      return NextResponse.json({ error: 'Unauthorized: Only approved owners can save AI settings' }, { status: 401 })
     }
 
-    const aiRes = await fetch(apiUrl, {
-      method: 'POST',
-      headers: customHeaders,
-      body: JSON.stringify({
-        model: aiModel,
-        messages: [
-          { role: 'system', content: aiPrompt },
-          ...chatMemory,
-        ],
-        max_tokens: 400,
-        temperature: 0.7,
-      }),
-    })
+    const { apiKey, prompt, baseUrl, model } = await request.json()
 
-    const aiData = await aiRes.json()
-    if (!aiRes.ok) {
-      throw new Error(aiData?.error?.message || `AI Provider failed with HTTP ${aiRes.status}`)
+    // এপিআই কি এনক্রিপ্ট করে সিকিউরডভাবে ডাটাবেজে সেভ করা হচ্ছে
+    const encryptedApiKey = apiKey ? encrypt(apiKey) : ''
+
+    // ডাটাবেজে আগে থেকে কনফিগ আছে কি না চেক
+    const { data: existingConfig } = await supabase
+      .from('whatsapp_config')
+      .select('id')
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
+
+    let dbError = null
+
+    if (existingConfig) {
+      // কনফিগ থাকলে আপডেট করা হচ্ছে
+      const { error } = await supabase
+        .from('whatsapp_config')
+        .update({
+          openai_api_key: encryptedApiKey,
+          ai_prompt: prompt,
+          ai_base_url: baseUrl,
+          ai_model: model,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('workspace_id', profile.workspace_id)
+      dbError = error
+    } else {
+      // কনফিগ না থাকলে নতুন ইনসার্ট করা হচ্ছে
+      const { error } = await supabase
+        .from('whatsapp_config')
+        .insert({
+          workspace_id: profile.workspace_id,
+          user_id: user.id,
+          openai_api_key: encryptedApiKey,
+          ai_prompt: prompt,
+          ai_base_url: baseUrl,
+          ai_model: model,
+        })
+      dbError = error
     }
 
-    const aiReplyText = aiData.choices?.[0]?.message?.content?.trim()
-    if (!aiReplyText) {
-      return NextResponse.json({ error: 'Failed to generate AI response' }, { status: 500 })
+    if (dbError) {
+      return NextResponse.json({ error: dbError.message }, { status: 500 })
     }
 
-    const decryptedMetaToken = decrypt(config.access_token)
-    const sanitizedPhone = sanitizePhoneForMeta(contact.phone)
-    const metaUrl = `https://graph.facebook.com/v22.0/${config.phone_number_id}/messages`
-
-    const metaPayload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: sanitizedPhone,
-      type: 'text',
-      text: { body: aiReplyText },
-      context: { message_id: record.message_id }
-    }
-
-    const metaResponse = await fetch(metaUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${decryptedMetaToken}`,
-      },
-      body: JSON.stringify(metaPayload),
-    })
-
-    const metaResData = await metaResponse.json()
-    if (!metaResponse.ok) {
-      throw new Error(metaResData?.error?.message || `Meta send failed with HTTP ${metaResponse.status}`)
-    }
-
-    const waMessageId = metaResData.messages?.[0]?.id || ''
-
-    const { error: insertError } = await supabaseAdmin
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_type: 'bot',
-        content_type: 'text',
-        content_text: aiReplyText,
-        message_id: waMessageId,
-        status: 'sent',
-      })
-
-    if (insertError) {
-      console.error('Failed to insert AI reply into DB:', insertError.message)
-    }
-
-    await supabaseAdmin
-      .from('conversations')
-      .update({
-        last_message_text: aiReplyText,
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId)
-
-    return NextResponse.json({ success: true, ai_reply: aiReplyText, wa_message_id: waMessageId })
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error in AI Responder POST:', errorMessage);
-    return NextResponse.json({ error: errorMessage }, { status: 500 })
+    return NextResponse.json({ success: true }, { status: 200 })
+  } catch (err) {
+    console.error('POST AI Settings Error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
