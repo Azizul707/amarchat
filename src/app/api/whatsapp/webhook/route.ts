@@ -6,13 +6,11 @@ import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 
-// MatchedConfig টাইপ-সেফ ইন্টারফেস
 interface MatchedConfigRow {
   id: string
   verify_token?: string
 }
 
-// ContactRow টাইপ-সেফ ইন্টারফেস
 interface ContactRow {
   id: string
   user_id: string
@@ -22,7 +20,6 @@ interface ContactRow {
   avatar_url?: string | null
 }
 
-// ContactOutcome টাইপ-সেফ ইন্টারফেস
 interface ContactOutcome {
   contact: ContactRow
   wasCreated: boolean
@@ -563,7 +560,6 @@ async function processMessage(
         }
 
         if (downloadResult) {
-          // Groq / OpenAI ডাইনামিক মডেল ডিটেকশন
           const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
@@ -573,38 +569,63 @@ async function processMessage(
             whisperModel = 'whisper-large-v3'
           }
 
-          // **স্থায়ী সমাধান (Manual Binary Multipart Construction)**:
-          const boundary = `----WebKitFormBoundary${Math.random().toString(36).substring(2)}`
-          const chunks: Buffer[] = []
+          let whisperRes: Response;
+          const isOpenRouter = aiBaseUrl.includes('openrouter');
 
-          // ১. Append model field
-          chunks.push(Buffer.from(`--${boundary}\r\n`))
-          chunks.push(Buffer.from(`Content-Disposition: form-data; name="model"\r\n\r\n`))
-          chunks.push(Buffer.from(`${whisperModel}\r\n`))
+          if (isOpenRouter) {
+            // ১. ওপেনরাউটার স্পেসিফিকেশন অনুযায়ী অডিও বাফারকে Base64 অবজেক্টে কনভার্ট করে JSON এ পাঠানো হচ্ছে।
+            const base64Audio = Buffer.from(downloadResult).toString('base64');
+            const openRouterModel = config.ai_model && config.ai_model.includes('whisper')
+              ? config.ai_model
+              : 'openai/whisper-1';
 
-          // ২. Append language field
-          chunks.push(Buffer.from(`--${boundary}\r\n`))
-          chunks.push(Buffer.from(`Content-Disposition: form-data; name="language"\r\n\r\n`))
-          chunks.push(Buffer.from(`bn\r\n`))
+            console.log(`[webhook-whisper] Sending Base64 JSON payload to OpenRouter STT: ${transcriptionUrl}`);
+            whisperRes = await fetch(transcriptionUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${decryptedApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: openRouterModel,
+                input_audio: {
+                  data: base64Audio,
+                  format: 'mp3'
+                },
+                language: 'bn'
+              })
+            });
+          } else {
+            // ২. স্ট্যান্ডার্ড OpenAI বা Groq এপিআই-এর জন্য প্রথাগত মাল্টিপার্ট বাফার কনস্ট্রাক্ট করা হচ্ছে।
+            const boundary = `----WebKitFormBoundary${Math.random().toString(36).substring(2)}`
+            const chunks: Buffer[] = []
 
-          // ৩. Append audio file field (proper boundary serialization)
-          chunks.push(Buffer.from(`--${boundary}\r\n`))
-          chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="voice.mp3"\r\n`))
-          chunks.push(Buffer.from(`Content-Type: audio/mpeg\r\n\r\n`))
-          chunks.push(Buffer.from(downloadResult))
-          chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`))
+            chunks.push(Buffer.from(`--${boundary}\r\n`))
+            chunks.push(Buffer.from(`Content-Disposition: form-data; name="model"\r\n\r\n`))
+            chunks.push(Buffer.from(`${whisperModel}\r\n`))
 
-          const multipartBody = Buffer.concat(chunks)
+            chunks.push(Buffer.from(`--${boundary}\r\n`))
+            chunks.push(Buffer.from(`Content-Disposition: form-data; name="language"\r\n\r\n`))
+            chunks.push(Buffer.from(`bn\r\n`))
 
-          console.log(`[webhook-whisper] Sending raw binary multipart to: ${transcriptionUrl}. Size: ${multipartBody.byteLength} bytes`);
-          const whisperRes = await fetch(transcriptionUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${decryptedApiKey}`,
-              'Content-Type': `multipart/form-data; boundary=${boundary}`,
-            },
-            body: multipartBody,
-          })
+            chunks.push(Buffer.from(`--${boundary}\r\n`))
+            chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="voice.mp3"\r\n`))
+            chunks.push(Buffer.from(`Content-Type: audio/mpeg\r\n\r\n`))
+            chunks.push(Buffer.from(downloadResult))
+            chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`))
+
+            const multipartBody = Buffer.concat(chunks)
+
+            console.log(`[webhook-whisper] Sending Multipart form boundary to Standard API: ${transcriptionUrl}`);
+            whisperRes = await fetch(transcriptionUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${decryptedApiKey}`,
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              },
+              body: multipartBody,
+            })
+          }
 
           if (whisperRes.ok) {
             const transData = await whisperRes.json()
@@ -659,7 +680,6 @@ async function processMessage(
     mediaUrl = parsed.mediaUrl
   }
 
-  // ডাটাবেজে রো আপডেট করা হচ্ছে
   console.log('[webhook-database] Updating locked message row with parsed results...');
   const { error: updateError } = await supabaseAdmin()
     .from('messages')
@@ -701,7 +721,6 @@ async function processMessage(
 
       let matchedContext = ''
       
-      // শুধুমাত্র সাকসেসফুল ট্রান্সক্রিপশন হলেই RAG নলেজবেজ খোঁজা হবে
       if (contentText && !isFallbackText && !isTranscriptionFailed) {
         console.log('[webhook-ai] Fetching embeddings...');
         const embedRes = await fetch(embeddingsUrl, {
@@ -734,7 +753,6 @@ async function processMessage(
         }
       }
 
-      // এআইকে কন্টেন্ট পাস করা (ট্রান্সক্রিপশন ফেইল হলে এবং অপ্রাসঙ্গিক ছবি পাঠালে সুনির্দিষ্ট ফিল্টার ইনস্ট্রাকশন ট্রিগার করবে)
       const userMessageContent: MessageContent[] = []
       
       if (isFallbackText || isTranscriptionFailed) {
