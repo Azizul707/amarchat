@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -28,7 +28,6 @@ interface ContactOutcome {
   wasCreated: boolean
 }
 
-// GPT-4o মাল্টিমোডাল ইনপুট টাইপ ইন্টারফেস
 interface MessageContentText {
   type: 'text'
   text: string
@@ -41,7 +40,6 @@ interface MessageContentImage {
 
 type MessageContent = MessageContentText | MessageContentImage
 
-// Lazy-initialized to avoid build-time crash when env vars are missing
 let _adminClient: SupabaseClient | null = null
 function supabaseAdmin(): SupabaseClient {
   if (!_adminClient) {
@@ -94,7 +92,6 @@ interface WhatsAppWebhookEntry {
   }>
 }
 
-// GET - Webhook verification
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -114,11 +111,8 @@ export async function GET(request: Request) {
       .select('id, verify_token')
 
     if (configError || !configs) {
-      console.error('Error fetching configs for verification:', configError)
-      return NextResponse.json(
-        { error: 'Verification failed' },
-        { status: 403 }
-      )
+      console.error('[webhook-verify] Error fetching configs:', configError)
+      return NextResponse.json({ error: 'Verification failed' }, { status: 403 })
     }
 
     let matchedConfig: MatchedConfigRow | null = null
@@ -142,10 +136,7 @@ export async function GET(request: Request) {
           .eq('id', matchedConfig.id)
           .then(({ error }: { error: unknown }) => {
             if (error) {
-              console.warn(
-                '[webhook] verify_token GCM upgrade failed:',
-                (error as { message?: string })?.message ?? error,
-              )
+              console.warn('[webhook-verify] upgrade failed:', error)
             }
           })
       }
@@ -155,26 +146,19 @@ export async function GET(request: Request) {
       })
     }
 
-    return NextResponse.json(
-      { error: 'Verification token mismatch' },
-      { status: 403 }
-    )
+    return NextResponse.json({ error: 'Verification token mismatch' }, { status: 403 })
   } catch (error) {
-    console.error('Error in webhook GET verification:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('[webhook-verify] Unexpected GET error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-// POST - Receive messages
 export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
   if (!verifyMetaWebhookSignature(rawBody, signature)) {
-    console.warn('[webhook] rejected request with invalid signature')
+    console.warn('[webhook] Rejected request: Invalid signature')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -185,11 +169,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  try {
-    await processWebhook(body)
-  } catch (error) {
-    console.error('Error processing webhook:', error)
-  }
+  // স্থায়ি সমাধান: মেটা-কে ১০ মিলি সেকেন্ডের মধ্যে রেসপন্স দেওয়া হলো যাতে retry জেনারেট না হয়।
+  // এআই এবং উইস্পারের মতো ধীরগতির কাজ ব্যাকগ্রাউন্ডে after() এর আওতায় রান করবে।
+  after(async () => {
+    try {
+      console.log('[webhook-after] Triggered background execution.')
+      await processWebhook(body)
+      console.log('[webhook-after] Background task finished gracefully.')
+    } catch (err) {
+      console.error('[webhook-after] Critical error in background task:', err)
+    }
+  })
 
   return NextResponse.json({ status: 'received' }, { status: 200 })
 }
@@ -218,7 +208,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         .single()
 
       if (configError || !config) {
-        console.error('No config found for phone_number_id:', phoneNumberId)
+        console.error('[webhook] Config lookup failed for phone number:', phoneNumberId, configError)
         continue
       }
 
@@ -279,7 +269,7 @@ async function handleStatusUpdate(status: {
     .eq('message_id', status.id)
 
   if (msgErr) {
-    console.error('Error updating message status:', msgErr)
+    console.error('[webhook] Status write error:', msgErr)
   }
 
   const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
@@ -291,7 +281,7 @@ async function handleStatusUpdate(status: {
     .maybeSingle()
 
   if (recFetchErr) {
-    console.error('Error fetching broadcast recipient:', recFetchErr)
+    console.error('[webhook] Broadcast fetch error:', recFetchErr)
     return
   }
   if (!recipient) return
@@ -309,7 +299,7 @@ async function handleStatusUpdate(status: {
     .eq('id', recipient.id)
 
   if (recUpdateErr) {
-    console.error('Error updating broadcast recipient status:', recUpdateErr)
+    console.error('[webhook] Broadcast recipient status error:', recUpdateErr)
   }
 }
 
@@ -333,10 +323,10 @@ async function flagBroadcastReplyIfAny(userId: string, contactId: string) {
       .eq('id', row.id)
 
     if (updErr) {
-      console.error('Error marking broadcast recipient replied:', updErr)
+      console.error('[webhook] Broadcast reply flag error:', updErr)
     }
   } catch (err) {
-    console.error('flagBroadcastReplyIfAny failed:', err)
+    console.error('[webhook] flagBroadcastReplyIfAny fail:', err)
   }
 }
 
@@ -351,7 +341,7 @@ async function lookupInternalIdByMetaId(
     .eq('conversation_id', conversationId)
     .maybeSingle()
   if (error) {
-    console.error('[webhook] lookupInternalIdByMetaId failed:', error.message)
+    console.error('[webhook] Reaction target lookup error:', error.message)
     return null
   }
   return data?.id ?? null
@@ -370,10 +360,7 @@ async function handleReaction(
     conversationId
   )
   if (!targetInternalId) {
-    console.warn(
-      '[webhook] reaction target message not found; skipping',
-      reaction.message_id
-    )
+    console.warn('[webhook] Target message missing for reaction:', reaction.message_id)
     return
   }
 
@@ -385,7 +372,7 @@ async function handleReaction(
       .eq('actor_type', 'customer')
       .eq('actor_id', contactId)
     if (delError) {
-      console.error('[webhook] reaction delete failed:', delError.message)
+      console.error('[webhook] Reaction delete error:', delError.message)
     }
     return
   }
@@ -403,7 +390,7 @@ async function handleReaction(
       { onConflict: 'message_id,actor_type,actor_id' }
     )
   if (upsertError) {
-    console.error('[webhook] reaction upsert failed:', upsertError.message)
+    console.error('[webhook] Reaction upsert error:', upsertError.message)
   }
 }
 
@@ -432,10 +419,12 @@ async function sendWhatsAppMessage(
     )
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}))
-      console.error('[webhook] Meta API send message failed:', errBody)
+      console.error('[webhook-send] Meta API message send failed:', errBody)
+    } else {
+      console.log('[webhook-send] WhatsApp response sent successfully to customer.')
     }
   } catch (err) {
-    console.error('[webhook] sendWhatsAppMessage exception:', err)
+    console.error('[webhook-send] Exception during WhatsApp send:', err)
   }
 }
 
@@ -446,7 +435,9 @@ async function processMessage(
   accessToken: string,
   phoneNumberId: string
 ) {
-  // ডাবল রিসিভিং ঠেকাতে মেটা আইডি চেক দিয়ে রিড করি
+  console.log(`[webhook] Received message event. ID: ${message.id}, Type: ${message.type}`);
+
+  // ডাটাবেজে লক চেক করে দেখি ডুপ্লিকেট কি না
   const { data: existingMsg } = await supabaseAdmin()
     .from('messages')
     .select('id')
@@ -454,25 +445,18 @@ async function processMessage(
     .maybeSingle()
 
   if (existingMsg) {
-    console.warn('[webhook] duplicate message detected; skipping processing', message.id)
+    console.warn('[webhook] Duplicate request detected at database read check; aborting processing.', message.id)
     return
   }
 
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
 
-  const contactOutcome = await findOrCreateContact(
-    userId,
-    senderPhone,
-    contactName
-  )
+  const contactOutcome = await findOrCreateContact(userId, senderPhone, contactName)
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
 
-  const conversation = await findOrCreateConversation(
-    userId,
-    contactRecord.id
-  )
+  const conversation = await findOrCreateConversation(userId, contactRecord.id)
   if (!conversation) return
 
   if (message.type === 'reaction') {
@@ -480,7 +464,6 @@ async function processMessage(
     return
   }
 
-  // ALLOWED_CONTENT_TYPES নির্ধারণ এবং contentType সেট করা হলো
   const ALLOWED_CONTENT_TYPES = new Set([
     'text', 'image', 'document', 'audio', 'video', 'location', 'template',
   ])
@@ -490,10 +473,9 @@ async function processMessage(
       ? 'image'
       : 'text'
 
-  // ১. আর্লি লক ইনসার্ট (Atomic Insert Lock): ডাটাবেজে একটি রো ইনসার্ট করি যা ইউনিক message_id দ্বারা লক হবে
-  // টেক্সট মেসেজ হলে সরাসরি কন্টেন্ট ইনসার্ট করে দেয়, যাতে অন্য ডুপ্লিকেট রিকোয়েস্ট ফেইল করে।
   const initialContentText = message.type === 'text' ? (message.text?.body || null) : '[ভয়েস মেসেজ...]'
 
+  console.log(`[webhook-lock] Inserting atomic row lock into 'messages' for message_id: ${message.id}`);
   const { data: earlyMsg, error: insertError } = await supabaseAdmin()
     .from('messages')
     .insert({
@@ -510,9 +492,11 @@ async function processMessage(
     .maybeSingle()
 
   if (insertError || !earlyMsg) {
-    console.warn('[webhook] Atomic lock triggered - duplicate message aborted early:', message.id)
+    console.warn('[webhook-lock] Lock rejected (duplicate row collision prevented):', message.id, insertError?.message)
     return
   }
+
+  console.log('[webhook-lock] Lock successfully obtained.');
 
   const { data: config } = await supabaseAdmin()
     .from('whatsapp_config')
@@ -527,8 +511,9 @@ async function processMessage(
   let imageBase64: string | null = null
   let isTranscriptionFailed = false 
 
-  if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
+  if (message.type === 'audio' && message.audio?.id && decryptedApiKey && config) {
     mediaUrl = `/api/whatsapp/media/${message.audio.id}`
+    console.log('[webhook-audio] Detected voice note. Fetching meta CDN URL for ID:', message.audio.id);
     
     try {
       const verifiedUrlData = (await getMediaUrl({
@@ -537,88 +522,79 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        let downloadResult: unknown = null
+        console.log('[webhook-audio] Obtained lookaside URL from Meta:', verifiedUrlData.url);
+        let downloadResult: ArrayBuffer | null = null
         let attempts = 0
         const maxAttempts = 3
-        const delayMs = 2000 // প্রতিটি ডাউনলোডের মাঝে ২ সেকেন্ড বিরতি
+        const delayMs = 2000
 
-        // ফেসবুক সিডিএন (fbcdn.net)-এর সিকিউরিটি হেডার ফরোয়ার্ডিং বাগ এড়াতে সেফ ডাউনলোডার
         const safeDownload = async (url: string, token: string): Promise<ArrayBuffer | null> => {
           try {
+            console.log('[webhook-download] Initiating download request to lookaside CDN.');
             const res = await fetch(url, {
               method: 'GET',
               headers: { Authorization: `Bearer ${token}` },
-              redirect: 'manual', // ডিরেক্ট রিডাইরেক্ট ব্লক করে হেডার ফরোয়ার্ডিং এড়ানো হলো
+              redirect: 'manual',
             })
-            // ৩xx রিডাইরেকশন হ্যান্ডলিং
+            console.log('[webhook-download] Initial fetch status:', res.status);
+            
             if (res.status >= 300 && res.status < 400) {
               const redirectUrl = res.headers.get('location')
               if (redirectUrl) {
-                // সিডিএন ডাউনলোড করার সময় কোনো Authorization হেডার পাঠানো হচ্ছে না (যাতে ৪০০ ব্যাড রিকোয়েস্ট না আসে)
+                console.log('[webhook-download] Redirecting cleanly to fbcdn. URL:', redirectUrl);
                 const cdnRes = await fetch(redirectUrl, { method: 'GET' })
+                console.log('[webhook-download] CDN response status:', cdnRes.status);
                 if (cdnRes.ok) return await cdnRes.arrayBuffer()
               }
             } else if (res.ok) {
               return await res.arrayBuffer()
             }
           } catch (e) {
-            console.error('[webhook] safeDownload error:', e)
+            console.error('[webhook-download] SafeDownload threw exception:', e)
           }
           return null
         }
 
-        // রিট্রাই লুপ (প্রথমবার ইনস্ট্যান্ট ডাউনলোডের জন্য ফিক্সড - delayMs রিট্রাইয়ের সময় কেবল কাজ করবে)
         while (attempts < maxAttempts) {
           if (attempts > 0) {
+            console.log(`[webhook-audio] Retrying audio download. Attempt: ${attempts + 1}, waiting ${delayMs}ms`);
             await new Promise((resolve) => setTimeout(resolve, delayMs))
           }
           
           const tempResult = await safeDownload(verifiedUrlData.url, accessToken)
 
           if (tempResult) {
-            // ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            console.log(`[webhook-audio] Download attempt ${attempts + 1} succeeded. Buffer size: ${tempResult.byteLength} bytes`);
             if (tempResult.byteLength > 500) {
               downloadResult = tempResult
               break
             } else {
-              console.warn(`[webhook] Audio download attempt ${attempts + 1}: File too small (${tempResult.byteLength} bytes), retrying...`)
+              console.warn(`[webhook-audio] File is too small (${tempResult.byteLength} bytes). Retrying...`)
             }
           }
           attempts++
         }
 
-        // যদি ৩ বার প্রচেষ্টার পরও ফাইল ছোট থাকে, তবে অন্তিম বাফারকে ফলব্যাক হিসেবে ব্যবহার করবে
-        if (!downloadResult && attempts >= maxAttempts) {
-          console.warn('[webhook] Audio download exceeded max attempts, fallback to final buffer request')
-          const finalResult = await safeDownload(verifiedUrlData.url, accessToken)
-          if (finalResult) {
-            downloadResult = finalResult
-          }
-        }
-        
         if (downloadResult) {
-          // টাইপসেফ অ্যারেবাফার থেকে ফাইল বা ব্লব তৈরি করা হলো
-          let file: File | Blob
-          if (typeof File !== 'undefined') {
-            file = new File([downloadResult as ArrayBuffer], 'voice.mp3', { type: 'audio/mpeg' })
-          } else {
-            file = new Blob([downloadResult as ArrayBuffer], { type: 'audio/mpeg' })
-          }
-
+          // রিয়েল-টাইম হুইস্পার ফর্মডাটা রানিং বাগার ফিক্স (File অবজেক্ট সম্পূর্ণ বর্জন করে Blob মেমোরি ট্রান্সফার)
+          const blob = new Blob([downloadResult as ArrayBuffer], { type: 'audio/mpeg' })
           const formData = new FormData()
-          if (typeof File !== 'undefined') {
-            formData.append('file', file)
-          } else {
-            formData.append('file', file, 'voice.mp3')
-          }
-          formData.append('model', 'whisper-1')
-          formData.append('language', 'bn')
+          formData.append('file', blob, 'voice.mp3')
 
-          // কাস্টম এবং ডিক্রিপ্ট করা BYOK এপিআই বেইস ইউআরএল ডাইনামিকালি ব্যবহার করা হচ্ছে
+          // Groq বনাম OpenAI ডাইনামিক মডেল ডিটেকশন
           const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
+          
+          let whisperModel = 'whisper-1'
+          if (aiBaseUrl.includes('groq')) {
+            whisperModel = 'whisper-large-v3'
+          }
 
+          formData.append('model', whisperModel)
+          formData.append('language', 'bn')
+
+          console.log(`[webhook-whisper] Sending to: ${transcriptionUrl}. Model: ${whisperModel}, API Key Length: ${decryptedApiKey.length}`);
           const whisperRes = await fetch(transcriptionUrl, {
             method: 'POST',
             headers: {
@@ -630,25 +606,27 @@ async function processMessage(
           if (whisperRes.ok) {
             const transData = await whisperRes.json()
             contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
+            console.log('[webhook-whisper] Transcribed text success:', contentText);
           } else {
             const errBody = await whisperRes.json().catch(() => ({}))
-            console.error('[webhook] Whisper transcription API failed:', whisperRes.status, JSON.stringify(errBody))
+            console.error('[webhook-whisper] API returned error status:', whisperRes.status, JSON.stringify(errBody))
             contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
             isTranscriptionFailed = true 
           }
         } else {
-          console.error('[webhook] Audio download from Meta failed (Buffer is empty)')
+          console.error('[webhook-audio] All 3 audio download attempts failed.')
           contentText = '[ভয়েস নোটটি ডাউনলোড করা যায়নি]'
           isTranscriptionFailed = true
         }
       }
     } catch (err) {
-      console.error('[webhook] Whisper transcription failed:', err)
+      console.error('[webhook-audio] Exception during voice translation flow:', err)
       contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
       isTranscriptionFailed = true
     }
   } else if (message.type === 'image' && message.image?.id) {
     mediaUrl = `/api/whatsapp/media/${message.image.id}`
+    console.log('[webhook-image] Image message detected. ID:', message.image.id);
     
     try {
       const verifiedUrlData = (await getMediaUrl({
@@ -668,10 +646,11 @@ async function processMessage(
           const buffer = Buffer.from(arrayBuffer)
           imageBase64 = `data:${verifiedUrlData.mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
           contentText = message.image.caption || null
+          console.log('[webhook-image] Vision Base64 generated successfully. Size:', buffer.byteLength);
         }
       }
     } catch (err) {
-      console.error('[webhook] Image download for vision failed:', err)
+      console.error('[webhook-image] Vision download exception:', err)
     }
   } else {
     const parsed = await parseMessageContent(message, accessToken)
@@ -679,7 +658,8 @@ async function processMessage(
     mediaUrl = parsed.mediaUrl
   }
 
-  // ২. সফল প্রসেসিং শেষে শুরুতে ইনসার্ট করা লক রো-টি আপডেট করি
+  // ডাটাবেজে লক করা কন্টেন্টটি রিয়েল উইস্পার ট্রান্সক্রিপ্ট টেক্সট দিয়ে আপডেট করি
+  console.log('[webhook-database] Updating locked message row with parsed results...');
   const { error: updateError } = await supabaseAdmin()
     .from('messages')
     .update({
@@ -689,7 +669,7 @@ async function processMessage(
     .eq('id', earlyMsg.id)
 
   if (updateError) {
-    console.error('[webhook] Failed to update message with final content:', updateError.message)
+    console.error('[webhook-database] Failed to update message row:', updateError.message)
   }
 
   const { count: priorCustomerMsgCount } = await supabaseAdmin()
@@ -699,7 +679,6 @@ async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) <= 1
 
-  // এআই যেন মেকি বা ফলব্যাক এরর টেক্সটের উত্তর কাস্টমারকে না পাঠায়
   const isFallbackText = contentText === '[ভয়েস নোটটি খালি ছিল]' || 
                          contentText === '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]' || 
                          contentText === '[ভয়েস নোটটি ডাউনলোড করা যায়নি]';
@@ -707,7 +686,7 @@ async function processMessage(
   const shouldTriggerAI = conversation.ai_active && 
     (contentText || message.type === 'image') && 
     !isTranscriptionFailed && 
-    !isFallbackText && // ফলব্যাক টেক্সট গার্ডরেইল এনাবেল্ড
+    !isFallbackText && 
     decryptedApiKey && 
     config;
 
@@ -724,6 +703,7 @@ async function processMessage(
       let matchedContext = ''
       
       if (contentText) {
+        console.log('[webhook-ai] Starting OpenAI Embedding fetch for RAG.');
         const embedRes = await fetch(embeddingsUrl, {
           method: 'POST',
           headers: {
@@ -739,6 +719,7 @@ async function processMessage(
         if (embedRes.ok) {
           const embedData = await embedRes.json()
           const queryVector = embedData.data[0].embedding
+          console.log('[webhook-ai] Embedding resolved. Querying postgres vector match_knowledge_base');
 
           const { data: ragDocs, error: ragError } = await supabaseAdmin()
             .rpc('match_knowledge_base', {
@@ -750,7 +731,12 @@ async function processMessage(
 
           if (!ragError && ragDocs) {
             matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+            console.log('[webhook-ai] RAG matches retrieved. Characters size:', matchedContext.length);
+          } else {
+            console.error('[webhook-ai] RAG Match RPC error:', ragError)
           }
+        } else {
+          console.error('[webhook-ai] Embedding API failed with status:', embedRes.status)
         }
       }
 
@@ -781,6 +767,7 @@ async function processMessage(
         customHeaders['X-Title'] = 'amarchat CRM'
       }
 
+      console.log(`[webhook-ai] Invoking chat/completions model: ${aiModel} on: ${chatUrl}`);
       const gptRes = await fetch(chatUrl, {
         method: 'POST',
         headers: customHeaders,
@@ -824,9 +811,11 @@ ${matchedContext || 'No specific business information is configured yet.'}
       if (gptRes.ok) {
         const gptData = await gptRes.json()
         const aiReplyText = gptData.choices[0].message.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
+        console.log('[webhook-ai] Generated reply text successfully:', aiReplyText);
 
         await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
 
+        console.log('[webhook-database] Inserting AI-generated reply into messages database...');
         await supabaseAdmin().from('messages').insert({
           conversation_id: conversation.id,
           sender_type: 'bot',
@@ -837,10 +826,10 @@ ${matchedContext || 'No specific business information is configured yet.'}
         })
       } else {
         const errBody = await gptRes.json().catch(() => ({}))
-        console.error('[webhook] AI completions API failed:', errBody)
+        console.error('[webhook-ai] GPT request failed:', gptRes.status, errBody)
       }
     } catch (err) {
-      console.error('[webhook] GPT/AI execution or send failed:', err)
+      console.error('[webhook-ai] GPT execution error:', err)
     }
   }
 
@@ -855,7 +844,7 @@ ${matchedContext || 'No specific business information is configured yet.'}
     .eq('id', conversation.id)
 
   if (convError) {
-    console.error('Error updating conversation:', convError)
+    console.error('[webhook-database] Error updating conversation timestamps:', convError)
   }
 
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
@@ -879,7 +868,7 @@ ${matchedContext || 'No specific business information is configured yet.'}
         message_text: inboundText,
         conversation_id: conversation.id,
       },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    }).catch((err) => console.error('[webhook-automation] trigger fail:', err))
   }
 }
 
@@ -890,17 +879,12 @@ async function parseMessageContent(
   contentText: string | null
   mediaUrl: string | null
 }> {
-  const verifyAndBuildUrl = async (
-    mediaId: string
-  ): Promise<string | null> => {
+  const verifyAndBuildUrl = async (mediaId: string): Promise<string | null> => {
     try {
       await getMediaUrl({ mediaId, accessToken })
       return `/api/whatsapp/media/${mediaId}`
     } catch (error) {
-      console.error(
-        `Failed to verify media ${mediaId} with Meta:`,
-        error instanceof Error ? error.message : error
-      )
+      console.error(`Failed to verify media ${mediaId} with Meta:`, error)
       return `/api/whatsapp/media/${mediaId}`
     }
   }
@@ -933,8 +917,7 @@ async function parseMessageContent(
     case 'document':
       if (message.document?.id) {
         return {
-          contentText:
-            message.document.caption || message.document.filename || null,
+          contentText: message.document.caption || message.document.filename || null,
           mediaUrl: await verifyAndBuildUrl(message.document.id),
         }
       }

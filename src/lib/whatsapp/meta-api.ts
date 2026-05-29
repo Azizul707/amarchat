@@ -261,32 +261,32 @@ export interface DownloadMediaArgs {
 
 /**
  * Fetch the binary bytes for a media URL obtained from getMediaUrl.
- * Step two of the media-proxy flow.
- *
- * Safe from the Meta CDN redirect bug (which returns 400 Bad Request
- * when the Authorization header is leaked to fbcdn.net).
+ * Safe from the Meta CDN redirect bug.
  */
 export async function downloadMedia(
   args: DownloadMediaArgs
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const { downloadUrl, accessToken } = args
 
-  // ১. ফেসবুক সিডিএন-এ যাওয়ার প্রথম রিকোয়েস্টটি ম্যানুয়াল রিডাইরেকশন দিয়ে পাঠানো হচ্ছে
+  console.log('[downloadMedia-meta] Starting download for URL:', downloadUrl);
+
   const response = await fetch(downloadUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    redirect: 'manual', // অটো রিডাইরেক্ট ব্লক করে হেডার ফরোয়ার্ডিং এড়ানো হলো
+    redirect: 'manual',
   })
+
+  console.log('[downloadMedia-meta] Lookaside initial response status:', response.status);
 
   let finalResponse = response
 
-  // ২. যদি রেসপন্স কোড ৩xx রেঞ্জ (Redirect) এর মধ্যে থাকে
   if (response.status >= 300 && response.status < 400) {
     const redirectUrl = response.headers.get('location')
     if (redirectUrl) {
-      // ৩. ফেসবুক সিডিএন (fbcdn.net) এ রিকোয়েস্ট করার সময় কোনো অথরাইজেশন হেডার পাস করা হচ্ছে না
+      console.log('[downloadMedia-meta] Intercepted redirect. Fetching CDN without Authorization header from:', redirectUrl);
       finalResponse = await fetch(redirectUrl, {
         method: 'GET',
       })
+      console.log('[downloadMedia-meta] CDN direct fetch status:', finalResponse.status);
     }
   }
 
@@ -297,5 +297,7 @@ export async function downloadMedia(
   const contentType =
     finalResponse.headers.get('content-type') || 'application/octet-stream'
   const buffer = Buffer.from(await finalResponse.arrayBuffer())
+  
+  console.log(`[downloadMedia-meta] Download complete. Size: ${buffer.byteLength} bytes, Type: ${contentType}`);
   return { buffer, contentType }
 }
