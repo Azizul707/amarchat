@@ -31,7 +31,6 @@ export async function GET(
       )
     }
 
-    // এজেন্টের প্রোফাইল থেকে workspace_id সংগ্রহ করা হচ্ছে
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('workspace_id')
@@ -45,7 +44,6 @@ export async function GET(
       )
     }
 
-    // এজেন্টের নিজের ইউজার আইডির বদলে ওয়ার্কস্পেস আইডি দিয়ে সিকিউরড কনফিগ রিড করা হচ্ছে
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -61,24 +59,52 @@ export async function GET(
 
     const accessToken = decrypt(config.access_token)
 
-    // Get the download URL from Meta
+    // ১. মেটা এপিআই থেকে ডাউনলোড লিঙ্ক সংগ্রহ করা হচ্ছে
     const mediaInfo = await getMediaUrl({ mediaId, accessToken })
 
-    // Download the binary data
-    const { buffer, contentType } = await downloadMedia({
-      downloadUrl: mediaInfo.url,
-      accessToken,
-    })
+    let downloadResult: { buffer: Buffer; contentType: string } | null = null
+    let attempts = 0
+    const maxAttempts = 3
+    const delayMs = 1500
 
-    // ব্রাউজার অডিও ডিউরেশন ও প্লেয়ার স্লাইডার ফিক্স:
-    // Content-Length এবং Accept-Ranges হেডার ব্যবহারের মাধ্যমে ব্রাউজারকে ডাইরেক্ট অডিও ফাইলের সাইজ জানানো হচ্ছে।
-    // এটি chunked transfer বন্ধ করে ব্রাউজারকে প্লে করার আগেই আসল ডিউরেশন (যেমন ০:১২) দেখাতে সাহায্য করে।
+    // ২. ব্রাউজার সেশন ক্র্যাশ বা মেটা প্রোপাগেশন ডিলে আটকাতে রেজিলিয়েন্ট ডাইনামিক রিট্রাই লুপ
+    while (attempts < maxAttempts) {
+      try {
+        if (attempts > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+
+        const res = await downloadMedia({
+          downloadUrl: mediaInfo.url,
+          accessToken,
+        })
+
+        if (res && res.buffer && res.buffer.byteLength > 500) {
+          downloadResult = res
+          break
+        }
+      } catch (err) {
+        console.warn(`[media-proxy] Download attempt ${attempts + 1} failed:`, err)
+      }
+      attempts++
+    }
+
+    if (!downloadResult) {
+      return NextResponse.json(
+        { error: 'Failed to download media file from Meta CDN after retries' },
+        { status: 502 }
+      )
+    }
+
+    const { buffer, contentType } = downloadResult
+
+    // ৩. ক্রোম ও সাফারির সঠিক ডিউরেশন দেখানোর জন্য হেডার ফিক্সড
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Content-Length': buffer.byteLength.toString(), // ফাইলের সঠিক বাইট সাইজ
-        'Accept-Ranges': 'bytes', // ব্রাউজারকে ফাইল মেটাডেটা সিঙ্ক করার অনুমতি দেয়
+        'Content-Length': buffer.byteLength.toString(),
+        'Accept-Ranges': 'bytes',
         'Cache-Control': 'public, max-age=86400',
       },
     })

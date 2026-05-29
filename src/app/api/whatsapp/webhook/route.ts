@@ -554,8 +554,8 @@ async function processMessage(
       if (verifiedUrlData && verifiedUrlData.url) {
         let downloadResult: ArrayBuffer | null = null
         let attempts = 0
-        const maxAttempts = 3
-        const delayMs = 2000
+        const maxAttempts = 5 // মেটা প্রোপাগেশন ডিলে আটকাতে ৫ বার চেষ্টা করা হচ্ছে
+        const delayMs = 2500 // প্রতিবার আড়াই সেকেন্ড ডিলে (মোট ১২.৫ সেকেন্ড ব্যাকগ্রাউন্ড বাফার উইন্ডো)
 
         while (attempts < maxAttempts) {
           if (attempts > 0) {
@@ -578,22 +578,38 @@ async function processMessage(
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
           
-          let whisperModel = 'whisper-1'
+          let whisperModel = 'openai/whisper-large-v3' // ওপেনরাউটার এর সাথে বেস্ট সামঞ্জস্যের জন্য স্ট্যান্ডার্ড ফলব্যাক
           if (aiBaseUrl.includes('groq')) {
             whisperModel = 'whisper-large-v3'
+          } else if (aiBaseUrl.includes('api.openai.com')) {
+            whisperModel = 'whisper-1'
           }
 
           let whisperRes: Response;
           const isOpenRouter = aiBaseUrl.includes('openrouter');
 
           if (isOpenRouter) {
-            // ১. ওপেনরাউটার স্পেসিফিকেশন অনুযায়ী অডিও বাফারকে Base64 অবজেক্টে কনভার্ট করে JSON এ পাঠানো হচ্ছে।
+            // ১. মার্চেন্ট OpenRouter ব্যবহার করলে: ওজিজি অডিও বাফারকে Base64 অবজেক্টে কনভার্ট করে JSON পে-লোডে পাঠানো হচ্ছে।
             const base64Audio = Buffer.from(downloadResult).toString('base64');
             const openRouterModel = config.ai_model && config.ai_model.includes('whisper')
               ? config.ai_model
-              : 'openai/whisper-1';
+              : 'openai/whisper-large-v3';
 
-            console.log(`[webhook-whisper] Sending Base64 JSON payload to OpenRouter STT: ${transcriptionUrl}`);
+            // ডাইনামিকলি অডিও ফরম্যাট চিহ্নিতকরণ (মেটা ভয়েস নোটের জন্য ওজিজি ও রিজিড ডিকোডিং সেভগার্ড)
+            let audioFormat = 'ogg';
+            if (verifiedUrlData.mimeType) {
+              if (verifiedUrlData.mimeType.includes('ogg')) {
+                audioFormat = 'ogg';
+              } else if (verifiedUrlData.mimeType.includes('mp4') || verifiedUrlData.mimeType.includes('m4a')) {
+                audioFormat = 'm4a';
+              } else if (verifiedUrlData.mimeType.includes('mpeg') || verifiedUrlData.mimeType.includes('mp3')) {
+                audioFormat = 'mp3';
+              } else if (verifiedUrlData.mimeType.includes('wav')) {
+                audioFormat = 'wav';
+              }
+            }
+
+            console.log(`[webhook-whisper] Sending Base64 JSON payload to OpenRouter STT. Format: ${audioFormat}, Model: ${openRouterModel}`);
             whisperRes = await fetch(transcriptionUrl, {
               method: 'POST',
               headers: {
@@ -604,7 +620,7 @@ async function processMessage(
                 model: openRouterModel,
                 input_audio: {
                   data: base64Audio,
-                  format: 'mp3'
+                  format: audioFormat
                 },
                 language: 'bn'
               })
@@ -947,7 +963,8 @@ async function parseMessageContent(
     case 'document':
       if (message.document?.id) {
         return {
-          contentText: message.document.caption || message.document.filename || null,
+          contentText:
+            message.document.caption || message.document.filename || null,
           mediaUrl: await verifyAndBuildUrl(message.document.id),
         }
       }
