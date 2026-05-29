@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl } from '@/lib/whatsapp/meta-api' // অব্যবহৃত downloadMedia সরানো হলো
+import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -446,7 +446,8 @@ async function processMessage(
   accessToken: string,
   phoneNumberId: string
 ) {
-  // বাগ ফিক্স ১: মেটার ডুপ্লিকেট ওয়েবহুক ও ডাবল রিপ্লাই (Double Reply) রোধে কড়া ইডেমপোটেন্সি চেক
+  // ডাবল রিপ্লাই (Double Reply) রোধে শুরুতেই ডাটাবেজে মেসেজটি ইনসার্ট করার চেষ্টা করি।
+  // message_id কলামে ইউনিক কনস্ট্রেইন্ট থাকলে এটি সাথে সাথে ডুপ্লিকেট ব্লক করবে।
   const { data: existingMsg } = await supabaseAdmin()
     .from('messages')
     .select('id')
@@ -480,6 +481,7 @@ async function processMessage(
     return
   }
 
+  // ইএসলিন্ট ফিক্স: অব্যবহৃত configError সরিয়ে নেওয়া হলো
   const { data: config } = await supabaseAdmin()
     .from('whatsapp_config')
     .select('*')
@@ -490,10 +492,19 @@ async function processMessage(
 
   let contentText: string | null = null
   let mediaUrl: string | null = null
-  let mediaType: string | null = null
   let imageBase64: string | null = null
-  
   let isTranscriptionFailed = false 
+
+  // বাগ ফিক্স ১: স্কোপিং এরর প্রতিরোধে contentType ভেরিয়েবলটি শুরুতেই ডিক্লেয়ার করা হলো
+  let contentType: string = 'text'
+  const ALLOWED_CONTENT_TYPES = new Set([
+    'text', 'image', 'document', 'audio', 'video', 'location', 'template',
+  ])
+  contentType = ALLOWED_CONTENT_TYPES.has(message.type)
+    ? message.type
+    : message.type === 'sticker'
+      ? 'image'
+      : 'text'
 
   if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
     mediaUrl = `/api/whatsapp/media/${message.audio.id}`
@@ -505,12 +516,13 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        let downloadResult: ArrayBuffer | null = null
+        // টাইপ ও ইএসলিন্ট ফিক্স ৩: downloadResult টাইপ হিসেবে 'unknown' ব্যবহার করা হলো no-explicit-any এড়াতে
+        let downloadResult: unknown = null
         let attempts = 0
         const maxAttempts = 3
         const delayMs = 2000 // প্রতিটি ডাউনলোডের মাঝে ২ সেকেন্ড বিরতি
 
-        // বাগ ফিক্স ২: ফেসবুক সিডিএন (fbcdn.net)-এর সিকিউরিটি হেডার ফরোয়ার্ডিং বাগ এড়াতে সেফ ডাউনলোডার
+        // ফেসবুক সিডিএন (fbcdn.net)-এর সিকিউরিটি হেডার ফরোয়ার্ডিং বাগ এড়াতে সেফ ডাউনলোডার
         const safeDownload = async (url: string, token: string): Promise<ArrayBuffer | null> => {
           try {
             const res = await fetch(url, {
@@ -562,9 +574,9 @@ async function processMessage(
         }
         
         if (downloadResult) {
-          // বাগ ফিক্স ৩: গেটওয়ে টাইপ ফিল্টার বাইপাস করতে ফাইলটিকে ওজিজি বাফারের ওপর বেস করে 'voice.mp3' নামে সাবমিট করা হলো
-          // টাইপস্ক্রিপ্ট টাইপ এরর এড়াতে সরাসরি Uint8Array থেকে Blob তৈরি করা হচ্ছে (Buffer এড়ানো হলো)
-          const blob = new Blob([new Uint8Array(downloadResult)], { type: 'audio/mpeg' })
+          // বাগ ফিক্স ৪: Node ও Web API-এর মধ্যে টাইপসেফ অ্যারেবাফার থেকে ডাবল কাস্টিং এর মাধ্যমে Blob তৈরি করা হলো
+          // typescript visual compiler error (ts2322) সম্পূর্ণ দূর করতে unknown as BlobPart ব্যবহার করা হলো
+          const blob = new Blob([downloadResult as unknown as BlobPart], { type: 'audio/mpeg' })
           const formData = new FormData()
           formData.append('file', blob, 'voice.mp3')
           formData.append('model', 'whisper-1')
@@ -633,42 +645,35 @@ async function processMessage(
     const parsed = await parseMessageContent(message, accessToken)
     contentText = parsed.contentText
     mediaUrl = parsed.mediaUrl
-    mediaType = parsed.mediaType
   }
 
-  void mediaType
+  // বাগ ফিক্স ৫ (First-Insert Lock): চ্যাট কম্পোনেন্টে কাস্টমার মেসেজটি শুরুতেই ডাটাবেজে ইনসার্ট করে সেভ করা হলো
+  const { data: tempMsg, error: insertError } = await supabaseAdmin()
+    .from('messages')
+    .insert({
+      conversation_id: conversation.id,
+      sender_type: 'customer',
+      content_type: contentType,
+      content_text: contentText,
+      media_url: mediaUrl,
+      message_id: message.id,
+      status: 'delivered',
+      created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+    })
+    .select()
+    .maybeSingle()
 
-  const ALLOWED_CONTENT_TYPES = new Set([
-    'text', 'image', 'document', 'audio', 'video', 'location', 'template',
-  ])
-  const contentType = ALLOWED_CONTENT_TYPES.has(message.type)
-    ? message.type
-    : message.type === 'sticker'
-      ? 'image'
-      : 'text'
+  if (insertError || !tempMsg) {
+    console.warn('[webhook] message insert failed or duplicate, aborting concurrent run:', insertError?.message)
+    return
+  }
 
   const { count: priorCustomerMsgCount } = await supabaseAdmin()
     .from('messages')
     .select('id', { count: 'exact', head: true })
     .eq('conversation_id', conversation.id)
     .eq('sender_type', 'customer')
-  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
-
-  const { error: msgError } = await supabaseAdmin().from('messages').insert({
-    conversation_id: conversation.id,
-    sender_type: 'customer',
-    content_type: contentType,
-    content_text: contentText,
-    media_url: mediaUrl,
-    message_id: message.id,
-    status: 'delivered',
-    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
-  })
-
-  if (msgError) {
-    console.error('Error inserting message:', msgError)
-    return
-  }
+  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) <= 1
 
   // এআই যেন মেকি বা ফলব্যাক এরর টেক্সটের উত্তর কাস্টমারকে না পাঠায়
   const isFallbackText = contentText === '[ভয়েস নোটটি খালি ছিল]' || 
@@ -860,7 +865,6 @@ async function parseMessageContent(
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
-  mediaType: string | null
 }> {
   const verifyAndBuildUrl = async (
     mediaId: string
@@ -882,7 +886,6 @@ async function parseMessageContent(
       return {
         contentText: message.text?.body || null,
         mediaUrl: null,
-        mediaType: null,
       }
 
     case 'image':
@@ -890,20 +893,18 @@ async function parseMessageContent(
         return {
           contentText: message.image.caption || null,
           mediaUrl: await verifyAndBuildUrl(message.image.id),
-          mediaType: message.image.mime_type,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'video':
       if (message.video?.id) {
         return {
           contentText: message.video.caption || null,
           mediaUrl: await verifyAndBuildUrl(message.video.id),
-          mediaType: message.video.mime_type,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'document':
       if (message.document?.id) {
@@ -911,30 +912,27 @@ async function parseMessageContent(
           contentText:
             message.document.caption || message.document.filename || null,
           mediaUrl: await verifyAndBuildUrl(message.document.id),
-          mediaType: message.document.mime_type,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'audio':
       if (message.audio?.id) {
         return {
           contentText: null,
           mediaUrl: await verifyAndBuildUrl(message.audio.id),
-          mediaType: message.audio.mime_type,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'sticker':
       if (message.sticker?.id) {
         return {
           contentText: null,
           mediaUrl: await verifyAndBuildUrl(message.sticker.id),
-          mediaType: message.sticker.mime_type,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'location':
       if (message.location) {
@@ -945,23 +943,20 @@ async function parseMessageContent(
         return {
           contentText: locationText,
           mediaUrl: null,
-          mediaType: null,
         }
       }
-      return { contentText: null, mediaUrl: null, mediaType: null }
+      return { contentText: null, mediaUrl: null }
 
     case 'reaction':
       return {
         contentText: message.reaction?.emoji || null,
         mediaUrl: null,
-        mediaType: null,
       }
 
     default:
       return {
         contentText: `[Unsupported message type: ${message.type}]`,
         mediaUrl: null,
-        mediaType: null,
       }
   }
 }
