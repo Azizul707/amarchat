@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl } from '@/lib/whatsapp/meta-api' // অব্যবহৃত downloadMedia সরানো হলো
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -446,6 +446,18 @@ async function processMessage(
   accessToken: string,
   phoneNumberId: string
 ) {
+  // বাগ ফিক্স ১: মেটার ডুপ্লিকেট ওয়েবহুক ও ডাবল রিপ্লাই (Double Reply) রোধে কড়া ইডেমপোটেন্সি চেক
+  const { data: existingMsg } = await supabaseAdmin()
+    .from('messages')
+    .select('id')
+    .eq('message_id', message.id)
+    .maybeSingle()
+
+  if (existingMsg) {
+    console.warn('[webhook] duplicate message detected; skipping processing', message.id)
+    return
+  }
+
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
 
@@ -468,7 +480,7 @@ async function processMessage(
     return
   }
 
-  const { data: config, error: configError } = await supabaseAdmin()
+  const { data: config } = await supabaseAdmin()
     .from('whatsapp_config')
     .select('*')
     .eq('workspace_id', conversation.workspace_id)
@@ -493,28 +505,49 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        let downloadResult = null
+        let downloadResult: ArrayBuffer | null = null
         let attempts = 0
         const maxAttempts = 3
         const delayMs = 2000 // প্রতিটি ডাউনলোডের মাঝে ২ সেকেন্ড বিরতি
 
-        // বাগ ফিক্স: রেস কন্ডিশন এড়াতে ডাইনামিক রিট্রাই লুপ
+        // বাগ ফিক্স ২: ফেসবুক সিডিএন (fbcdn.net)-এর সিকিউরিটি হেডার ফরোয়ার্ডিং বাগ এড়াতে সেফ ডাউনলোডার
+        const safeDownload = async (url: string, token: string): Promise<ArrayBuffer | null> => {
+          try {
+            const res = await fetch(url, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${token}` },
+              redirect: 'manual', // ডিরেক্ট রিডাইরেক্ট ব্লক করে হেডার ফরোয়ার্ডিং এড়ানো হলো
+            })
+            if (res.status === 301 || res.status === 302 || res.status === 307) {
+              const redirectUrl = res.headers.get('location')
+              if (redirectUrl) {
+                // সিডিএন ডাউনলোড করার সময় কোনো Authorization হেডার পাঠানো হচ্ছে না (যাতে ৪০০ ব্যাড রিকোয়েস্ট না আসে)
+                const cdnRes = await fetch(redirectUrl, { method: 'GET' })
+                if (cdnRes.ok) return await cdnRes.arrayBuffer()
+              }
+            } else if (res.ok) {
+              return await res.arrayBuffer()
+            }
+          } catch (e) {
+            console.error('[webhook] safeDownload error:', e)
+          }
+          return null
+        }
+
+        // রেস কন্ডিশন এড়াতে ডাইনামিক রিট্রাই লুপ
         while (attempts < maxAttempts) {
           attempts++
           await new Promise((resolve) => setTimeout(resolve, delayMs))
           
-          const tempResult = await downloadMedia({
-            downloadUrl: verifiedUrlData.url,
-            accessToken,
-          })
+          const tempResult = await safeDownload(verifiedUrlData.url, accessToken)
 
-          if (tempResult && tempResult.buffer) {
-            // ৫ সেকেন্ড বা তার ছোট ওজিজি ভয়েস নোটের সাইট সাধারণত ৫০০ বাইটের বেশি থাকে
-            if (tempResult.buffer.byteLength > 500) {
+          if (tempResult) {
+            // বাগ ফিক্স: ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            if (tempResult.byteLength > 500) {
               downloadResult = tempResult
               break
             } else {
-              console.warn(`[webhook] Audio download attempt ${attempts}: File too small (${tempResult.buffer.byteLength} bytes), retrying...`)
+              console.warn(`[webhook] Audio download attempt ${attempts}: File too small (${tempResult.byteLength} bytes), retrying...`)
             }
           }
         }
@@ -522,23 +555,18 @@ async function processMessage(
         // যদি ৩ বার প্রচেষ্টার পরও ফাইল ছোট থাকে, তবে অন্তিম বাফারকে ফলব্যাক হিসেবে ব্যবহার করবে
         if (!downloadResult && attempts >= maxAttempts) {
           console.warn('[webhook] Audio download exceeded max attempts, fallback to final buffer request')
-          const finalResult = await downloadMedia({
-            downloadUrl: verifiedUrlData.url,
-            accessToken,
-          })
-          if (finalResult && finalResult.buffer) {
+          const finalResult = await safeDownload(verifiedUrlData.url, accessToken)
+          if (finalResult) {
             downloadResult = finalResult
           }
         }
         
-        if (downloadResult && downloadResult.buffer) {
-          const audioBuffer = Buffer.from(downloadResult.buffer)
-          
-          // গেটওয়ে বাইপাস হ্যাক: OpenAI গেটওয়ের ওজিজি টাইপ রিজেকশন এড়াতে ফাইলটিকে 'voice.mp3' এবং 'audio/mpeg' আকারে সাবমিট করা হচ্ছে।
-          // Whisper-এর ইন্টারনাল ffmpeg সফলভাবে ওজিজি বাইনারি রিড করে নিখুঁত বাংলা ডিকোড করে ফেলবে।
-          const file = new File([audioBuffer], 'voice.mp3', { type: 'audio/mpeg' })
+        if (downloadResult) {
+          // বাগ ফিক্স ৩: গেটওয়ে টাইপ ফিল্টার বাইপাস করতে ফাইলটিকে ওজিজি বাফারের ওপর বেস করে 'voice.mp3' নামে সাবমিট করা হলো
+          // টাইপস্ক্রিপ্ট টাইপ এরর এড়াতে সরাসরি Uint8Array থেকে Blob তৈরি করা হচ্ছে (Buffer এড়ানো হলো)
+          const blob = new Blob([new Uint8Array(downloadResult)], { type: 'audio/mpeg' })
           const formData = new FormData()
-          formData.append('file', file)
+          formData.append('file', blob, 'voice.mp3')
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
