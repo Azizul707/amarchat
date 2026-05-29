@@ -169,15 +169,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // স্থায়ি সমাধান: মেটা-কে ১০ মিলি সেকেন্ডের মধ্যে রেসপন্স দেওয়া হলো যাতে retry জেনারেট না হয়।
-  // এআই এবং উইস্পারের মতো ধীরগতির কাজ ব্যাকগ্রাউন্ডে after() এর আওতায় রান করবে।
+  // মেটা-কে instantly HTTP 200 দিয়ে দেওয়া হচ্ছে যাতে ডুপ্লিকেট retry জেনারেট না হয়।
   after(async () => {
     try {
-      console.log('[webhook-after] Triggered background execution.')
+      console.log('[webhook-after] Background thread starting.');
       await processWebhook(body)
-      console.log('[webhook-after] Background task finished gracefully.')
+      console.log('[webhook-after] Background thread finished gracefully.');
     } catch (err) {
-      console.error('[webhook-after] Critical error in background task:', err)
+      console.error('[webhook-after] Background thread crash:', err)
     }
   })
 
@@ -437,7 +436,6 @@ async function processMessage(
 ) {
   console.log(`[webhook] Received message event. ID: ${message.id}, Type: ${message.type}`);
 
-  // ডাটাবেজে লক চেক করে দেখি ডুপ্লিকেট কি না
   const { data: existingMsg } = await supabaseAdmin()
     .from('messages')
     .select('id')
@@ -445,7 +443,7 @@ async function processMessage(
     .maybeSingle()
 
   if (existingMsg) {
-    console.warn('[webhook] Duplicate request detected at database read check; aborting processing.', message.id)
+    console.warn('[webhook] Duplicate request detected; skipping processing.', message.id)
     return
   }
 
@@ -475,7 +473,7 @@ async function processMessage(
 
   const initialContentText = message.type === 'text' ? (message.text?.body || null) : '[ভয়েস মেসেজ...]'
 
-  console.log(`[webhook-lock] Inserting atomic row lock into 'messages' for message_id: ${message.id}`);
+  console.log(`[webhook-lock] Inserting atomic row lock for message_id: ${message.id}`);
   const { data: earlyMsg, error: insertError } = await supabaseAdmin()
     .from('messages')
     .insert({
@@ -495,8 +493,6 @@ async function processMessage(
     console.warn('[webhook-lock] Lock rejected (duplicate row collision prevented):', message.id, insertError?.message)
     return
   }
-
-  console.log('[webhook-lock] Lock successfully obtained.');
 
   const { data: config } = await supabaseAdmin()
     .from('whatsapp_config')
@@ -522,7 +518,6 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        console.log('[webhook-audio] Obtained lookaside URL from Meta:', verifiedUrlData.url);
         let downloadResult: ArrayBuffer | null = null
         let attempts = 0
         const maxAttempts = 3
@@ -530,58 +525,45 @@ async function processMessage(
 
         const safeDownload = async (url: string, token: string): Promise<ArrayBuffer | null> => {
           try {
-            console.log('[webhook-download] Initiating download request to lookaside CDN.');
             const res = await fetch(url, {
               method: 'GET',
               headers: { Authorization: `Bearer ${token}` },
               redirect: 'manual',
             })
-            console.log('[webhook-download] Initial fetch status:', res.status);
             
             if (res.status >= 300 && res.status < 400) {
               const redirectUrl = res.headers.get('location')
               if (redirectUrl) {
-                console.log('[webhook-download] Redirecting cleanly to fbcdn. URL:', redirectUrl);
                 const cdnRes = await fetch(redirectUrl, { method: 'GET' })
-                console.log('[webhook-download] CDN response status:', cdnRes.status);
                 if (cdnRes.ok) return await cdnRes.arrayBuffer()
               }
             } else if (res.ok) {
               return await res.arrayBuffer()
             }
           } catch (e) {
-            console.error('[webhook-download] SafeDownload threw exception:', e)
+            console.error('[webhook-download] safeDownload exception:', e)
           }
           return null
         }
 
         while (attempts < maxAttempts) {
           if (attempts > 0) {
-            console.log(`[webhook-audio] Retrying audio download. Attempt: ${attempts + 1}, waiting ${delayMs}ms`);
             await new Promise((resolve) => setTimeout(resolve, delayMs))
           }
           
           const tempResult = await safeDownload(verifiedUrlData.url, accessToken)
 
           if (tempResult) {
-            console.log(`[webhook-audio] Download attempt ${attempts + 1} succeeded. Buffer size: ${tempResult.byteLength} bytes`);
             if (tempResult.byteLength > 500) {
               downloadResult = tempResult
               break
-            } else {
-              console.warn(`[webhook-audio] File is too small (${tempResult.byteLength} bytes). Retrying...`)
             }
           }
           attempts++
         }
 
         if (downloadResult) {
-          // রিয়েল-টাইম হুইস্পার ফর্মডাটা রানিং বাগার ফিক্স (File অবজেক্ট সম্পূর্ণ বর্জন করে Blob মেমোরি ট্রান্সফার)
-          const blob = new Blob([downloadResult as ArrayBuffer], { type: 'audio/mpeg' })
-          const formData = new FormData()
-          formData.append('file', blob, 'voice.mp3')
-
-          // Groq বনাম OpenAI ডাইনামিক মডেল ডিটেকশন
+          // Groq / OpenAI ডাইনামিক মডেল ডিটেকশন
           const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
@@ -591,42 +573,62 @@ async function processMessage(
             whisperModel = 'whisper-large-v3'
           }
 
-          formData.append('model', whisperModel)
-          formData.append('language', 'bn')
+          // **স্থায়ী সমাধান (Manual Binary Multipart Construction)**:
+          const boundary = `----WebKitFormBoundary${Math.random().toString(36).substring(2)}`
+          const chunks: Buffer[] = []
 
-          console.log(`[webhook-whisper] Sending to: ${transcriptionUrl}. Model: ${whisperModel}, API Key Length: ${decryptedApiKey.length}`);
+          // ১. Append model field
+          chunks.push(Buffer.from(`--${boundary}\r\n`))
+          chunks.push(Buffer.from(`Content-Disposition: form-data; name="model"\r\n\r\n`))
+          chunks.push(Buffer.from(`${whisperModel}\r\n`))
+
+          // ২. Append language field
+          chunks.push(Buffer.from(`--${boundary}\r\n`))
+          chunks.push(Buffer.from(`Content-Disposition: form-data; name="language"\r\n\r\n`))
+          chunks.push(Buffer.from(`bn\r\n`))
+
+          // ৩. Append audio file field (proper boundary serialization)
+          chunks.push(Buffer.from(`--${boundary}\r\n`))
+          chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="voice.mp3"\r\n`))
+          chunks.push(Buffer.from(`Content-Type: audio/mpeg\r\n\r\n`))
+          chunks.push(Buffer.from(downloadResult))
+          chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`))
+
+          const multipartBody = Buffer.concat(chunks)
+
+          console.log(`[webhook-whisper] Sending raw binary multipart to: ${transcriptionUrl}. Size: ${multipartBody.byteLength} bytes`);
           const whisperRes = await fetch(transcriptionUrl, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${decryptedApiKey}`,
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
             },
-            body: formData,
+            body: multipartBody,
           })
 
           if (whisperRes.ok) {
             const transData = await whisperRes.json()
             contentText = transData.text || '[ভয়েস নোটটি খালি ছিল]'
-            console.log('[webhook-whisper] Transcribed text success:', contentText);
+            console.log('[webhook-whisper] Transcribed successfully:', contentText);
           } else {
             const errBody = await whisperRes.json().catch(() => ({}))
-            console.error('[webhook-whisper] API returned error status:', whisperRes.status, JSON.stringify(errBody))
+            console.error('[webhook-whisper] Failed with status:', whisperRes.status, JSON.stringify(errBody))
             contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
             isTranscriptionFailed = true 
           }
         } else {
-          console.error('[webhook-audio] All 3 audio download attempts failed.')
+          console.error('[webhook-audio] Voice file download failed.')
           contentText = '[ভয়েস নোটটি ডাউনলোড করা যায়নি]'
           isTranscriptionFailed = true
         }
       }
     } catch (err) {
-      console.error('[webhook-audio] Exception during voice translation flow:', err)
+      console.error('[webhook-audio] Voice transcription flow exception:', err)
       contentText = '[ভয়েস নোটটি ট্রান্সক্রাইব করা যায়নি]'
       isTranscriptionFailed = true
     }
   } else if (message.type === 'image' && message.image?.id) {
     mediaUrl = `/api/whatsapp/media/${message.image.id}`
-    console.log('[webhook-image] Image message detected. ID:', message.image.id);
     
     try {
       const verifiedUrlData = (await getMediaUrl({
@@ -646,11 +648,10 @@ async function processMessage(
           const buffer = Buffer.from(arrayBuffer)
           imageBase64 = `data:${verifiedUrlData.mimeType || 'image/jpeg'};base64,${buffer.toString('base64')}`
           contentText = message.image.caption || null
-          console.log('[webhook-image] Vision Base64 generated successfully. Size:', buffer.byteLength);
         }
       }
     } catch (err) {
-      console.error('[webhook-image] Vision download exception:', err)
+      console.error('[webhook-image] Vision download failed:', err)
     }
   } else {
     const parsed = await parseMessageContent(message, accessToken)
@@ -658,7 +659,7 @@ async function processMessage(
     mediaUrl = parsed.mediaUrl
   }
 
-  // ডাটাবেজে লক করা কন্টেন্টটি রিয়েল উইস্পার ট্রান্সক্রিপ্ট টেক্সট দিয়ে আপডেট করি
+  // ডাটাবেজে রো আপডেট করা হচ্ছে
   console.log('[webhook-database] Updating locked message row with parsed results...');
   const { error: updateError } = await supabaseAdmin()
     .from('messages')
@@ -685,8 +686,6 @@ async function processMessage(
 
   const shouldTriggerAI = conversation.ai_active && 
     (contentText || message.type === 'image') && 
-    !isTranscriptionFailed && 
-    !isFallbackText && 
     decryptedApiKey && 
     config;
 
@@ -702,8 +701,9 @@ async function processMessage(
 
       let matchedContext = ''
       
-      if (contentText) {
-        console.log('[webhook-ai] Starting OpenAI Embedding fetch for RAG.');
+      // শুধুমাত্র সাকসেসফুল ট্রান্সক্রিপশন হলেই RAG নলেজবেজ খোঁজা হবে
+      if (contentText && !isFallbackText && !isTranscriptionFailed) {
+        console.log('[webhook-ai] Fetching embeddings...');
         const embedRes = await fetch(embeddingsUrl, {
           method: 'POST',
           headers: {
@@ -719,7 +719,6 @@ async function processMessage(
         if (embedRes.ok) {
           const embedData = await embedRes.json()
           const queryVector = embedData.data[0].embedding
-          console.log('[webhook-ai] Embedding resolved. Querying postgres vector match_knowledge_base');
 
           const { data: ragDocs, error: ragError } = await supabaseAdmin()
             .rpc('match_knowledge_base', {
@@ -731,20 +730,25 @@ async function processMessage(
 
           if (!ragError && ragDocs) {
             matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
-            console.log('[webhook-ai] RAG matches retrieved. Characters size:', matchedContext.length);
-          } else {
-            console.error('[webhook-ai] RAG Match RPC error:', ragError)
           }
-        } else {
-          console.error('[webhook-ai] Embedding API failed with status:', embedRes.status)
         }
       }
 
+      // এআইকে কন্টেন্ট পাস করা (ট্রান্সক্রিপশন ফেইল হলে এবং অপ্রাসঙ্গিক ছবি পাঠালে সুনির্দিষ্ট ফিল্টার ইনস্ট্রাকশন ট্রিগার করবে)
       const userMessageContent: MessageContent[] = []
-      if (contentText) {
-        userMessageContent.push({ type: 'text', text: contentText })
+      
+      if (isFallbackText || isTranscriptionFailed) {
+        userMessageContent.push({
+          type: 'text',
+          text: 'কাস্টমার একটি ভয়েস মেসেজ পাঠিয়েছেন কিন্তু কারিগরি ত্রুটির কারণে ভয়েসটি শোনা যায়নি। কাস্টমারকে অত্যন্ত বিনয়ের সাথে বাংলায় বলুন যে ভয়েসটি স্পষ্ট শোনা যায়নি এবং কষ্ট করে টেক্সট লিখে জানাতে বলুন।'
+        })
       } else if (message.type === 'image') {
-        userMessageContent.push({ type: 'text', text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটিতে কী আছে তা দেখুন এবং বাংলায় সাহায্য করুন।' })
+        userMessageContent.push({ 
+          type: 'text', 
+          text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটি বিশ্লেষণ করুন। কঠোর নিয়ম: যদি ছবিটি এই ব্যবসার নলেজবেজ বা ডোমেইনের সাথে সরাসরি সম্পর্কিত হয় (যেমন: আপনার নিজস্ব পণ্য, পেমেন্ট স্ক্রিনশট, অর্ডার রিসিট, বা ত্রুটিপূর্ণ পণ্য), তবে নলেজবেজ অনুসরণ করে বাংলায় গ্রাহককে সহায়তা করুন। আর যদি ছবিটি ব্যবসার বাইরের সম্পূর্ণ অপ্রাসঙ্গিক কোনো বিষয় হয় (যেমন: মিম, সেলফি, বিনোদনমূলক বা অন্য কোনো অবান্তর ছবি), তবে কোনোভাবেই ওই অবান্তর ছবি নিয়ে আলোচনায় মাতবেন না। অত্যন্ত ভদ্রভাবে বাংলায় দুঃখ প্রকাশ করে বলুন যে আপনি কেবল এই নির্দিষ্ট ব্যবসার পণ্য ও সেবা সংক্রান্ত বিষয়ে সাহায্য করতে পারেন এবং তাকে ব্যবসার বিষয় নিয়ে কথা বলতে অনুরোধ করুন।' 
+        })
+      } else if (contentText) {
+        userMessageContent.push({ type: 'text', text: contentText })
       }
 
       if (message.type === 'image' && imageBase64) {
@@ -767,7 +771,7 @@ async function processMessage(
         customHeaders['X-Title'] = 'amarchat CRM'
       }
 
-      console.log(`[webhook-ai] Invoking chat/completions model: ${aiModel} on: ${chatUrl}`);
+      console.log(`[webhook-ai] Call to completions model: ${aiModel}`);
       const gptRes = await fetch(chatUrl, {
         method: 'POST',
         headers: customHeaders,
@@ -811,11 +815,10 @@ ${matchedContext || 'No specific business information is configured yet.'}
       if (gptRes.ok) {
         const gptData = await gptRes.json()
         const aiReplyText = gptData.choices[0].message.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
-        console.log('[webhook-ai] Generated reply text successfully:', aiReplyText);
+        console.log('[webhook-ai] Success response:', aiReplyText);
 
         await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
 
-        console.log('[webhook-database] Inserting AI-generated reply into messages database...');
         await supabaseAdmin().from('messages').insert({
           conversation_id: conversation.id,
           sender_type: 'bot',
@@ -826,10 +829,10 @@ ${matchedContext || 'No specific business information is configured yet.'}
         })
       } else {
         const errBody = await gptRes.json().catch(() => ({}))
-        console.error('[webhook-ai] GPT request failed:', gptRes.status, errBody)
+        console.error('[webhook-ai] completions failed:', errBody)
       }
     } catch (err) {
-      console.error('[webhook-ai] GPT execution error:', err)
+      console.error('[webhook-ai] execution error:', err)
     }
   }
 
@@ -844,7 +847,7 @@ ${matchedContext || 'No specific business information is configured yet.'}
     .eq('id', conversation.id)
 
   if (convError) {
-    console.error('[webhook-database] Error updating conversation timestamps:', convError)
+    console.error('[webhook-database] conversation timestamp update fail:', convError)
   }
 
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
