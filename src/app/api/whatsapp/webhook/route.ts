@@ -747,33 +747,51 @@ async function processMessage(
       let matchedContext = ''
       
       if (contentText && !isFallbackText && !isTranscriptionFailed) {
-        console.log('[webhook-ai] Fetching embeddings...');
-        const embedRes = await fetch(embeddingsUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${decryptedApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            input: contentText,
-            model: embeddingModel,
-          }),
-        })
+        console.log('[webhook-ai] Fetching Knowledge Base directly by workspace_id to avoid RAG dilution:', conversation.workspace_id);
+        
+        // **১-টু-১ এন্টারপ্রাইজ ফিক্স (Direct exact select lookup)**: 
+        // যেহেতু amarchat-এ প্রতি মার্চেন্টের জন্য একটি ইউনিক নলেজ বেস রো থাকে, তাইCosine Similarity এর গাণিতিক হ্রাস (dilution)
+        // এড়াতে আমরা সরাসরি ১ মিলি সেকেন্ডে ডাটাবেজ থেকে কন্টেন্ট লোড করছি। এটি এআই-এর কাছে রিয়েল-টাইম তথ্য পৌঁছানো নিশ্চিত করে।
+        const { data: kbRow, error: kbError } = await supabaseAdmin()
+          .from('knowledge_base')
+          .select('content')
+          .eq('workspace_id', conversation.workspace_id)
+          .maybeSingle()
 
-        if (embedRes.ok) {
-          const embedData = await embedRes.json()
-          const queryVector = embedData.data[0].embedding
+        if (!kbError && kbRow?.content) {
+          matchedContext = kbRow.content
+          console.log('[webhook-ai] Direct exact knowledge base retrieval succeeded. Size:', matchedContext.length);
+        } else {
+          console.warn('[webhook-ai] Direct lookup failed or empty. Falling back to semantic vector search...', kbError);
+          
+          // সেফ ফলব্যাক: সরাসরি ডাটা না পেলে ভেক্টর আরপিসি ম্যাচিং চেষ্টা করা হচ্ছে
+          const embedRes = await fetch(embeddingsUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${decryptedApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              input: contentText,
+              model: embeddingModel,
+            }),
+          })
 
-          const { data: ragDocs, error: ragError } = await supabaseAdmin()
-            .rpc('match_knowledge_base', {
-              query_embedding: queryVector,
-              match_threshold: 0.3,
-              match_count: 3,
-              p_workspace_id: conversation.workspace_id,
-            })
+          if (embedRes.ok) {
+            const embedData = await embedRes.json()
+            const queryVector = embedData.data[0].embedding
 
-          if (!ragError && ragDocs) {
-            matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+            const { data: ragDocs, error: ragError } = await supabaseAdmin()
+              .rpc('match_knowledge_base', {
+                query_embedding: queryVector,
+                match_threshold: 0.3,
+                match_count: 3,
+                p_workspace_id: conversation.workspace_id,
+              })
+
+            if (!ragError && ragDocs) {
+              matchedContext = (ragDocs as Array<{ content: string }>).map((doc) => doc.content).join('\n')
+            }
           }
         }
       }
@@ -837,12 +855,12 @@ Your entire identity, scope of work, and product catalog are STRICTLY limited to
 - If the request aligns with the knowledge base, be highly persuasive and friendly. Speak in a warm Bangla/Banglish blend, using respectful terms like "সম্মানিত ক্রেতা".
 - Provide clear answers, assist in closing the sale, and offer any discount/combo structures if documented in the knowledge base.
 
-3. FALLBACK WHEN KNOWLEDGE BASE IS EMPTY:
-- If the "BUSINESS KNOWLEDGE BASE" section below is empty or has no information, do not offer general warm support for random topics. Politely state that you are the automated assistant for this business, and ask them how you can help them regarding this business specifically, without making up fake products or services.
+3. FALLBACK WHEN KNOWLEDGE BASE IS EMPTY OR NOT ACCESSIBLE:
+- If the "BUSINESS KNOWLEDGE BASE" section below is empty, completely unconfigured, or has no information about the business yet, politely apologize and state that currently you do not have any specific product or business information. Ask the customer how you can assist them regarding their questions (e.g. "আমি আপনাকে কিভাবে সাহায্য করতে পারি?"). Crucially: Never ask the customer how they can help the business (e.g. do not say "আপনি কিভাবে আমাদের সাহায্য করতে চান"). Always offer assistance from the business to the customer.
 
 BUSINESS KNOWLEDGE BASE:
 ---------------------
-${matchedContext || 'No specific business information is configured yet.'}
+${matchedContext || ''}
 ---------------------`
             },
             {
