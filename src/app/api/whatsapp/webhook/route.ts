@@ -446,8 +446,7 @@ async function processMessage(
   accessToken: string,
   phoneNumberId: string
 ) {
-  // ডাবল রিপ্লাই (Double Reply) রোধে শুরুতেই ডাটাবেজে মেসেজটি ইনসার্ট করার চেষ্টা করি।
-  // message_id কলামে ইউনিক কনস্ট্রেইন্ট থাকলে এটি সাথে সাথে ডুপ্লিকেট ব্লক করবে।
+  // ডাবল রিসিভিং ঠেকাতে মেটা আইডি চেক দিয়ে রিড করি
   const { data: existingMsg } = await supabaseAdmin()
     .from('messages')
     .select('id')
@@ -481,7 +480,40 @@ async function processMessage(
     return
   }
 
-  // ইএসলিন্ট ফিক্স: অব্যবহৃত configError সরিয়ে নেওয়া হলো
+  // ALLOWED_CONTENT_TYPES নির্ধারণ এবং contentType সেট করা হলো
+  const ALLOWED_CONTENT_TYPES = new Set([
+    'text', 'image', 'document', 'audio', 'video', 'location', 'template',
+  ])
+  const contentType = ALLOWED_CONTENT_TYPES.has(message.type)
+    ? message.type
+    : message.type === 'sticker'
+      ? 'image'
+      : 'text'
+
+  // ১. আর্লি লক ইনসার্ট (Atomic Insert Lock): ডাটাবেজে একটি রো ইনসার্ট করি যা ইউনিক message_id দ্বারা লক হবে
+  // টেক্সট মেসেজ হলে সরাসরি কন্টেন্ট ইনসার্ট করে দেয়, যাতে অন্য ডুপ্লিকেট রিকোয়েস্ট ফেইল করে।
+  const initialContentText = message.type === 'text' ? (message.text?.body || null) : '[ভয়েস মেসেজ...]'
+
+  const { data: earlyMsg, error: insertError } = await supabaseAdmin()
+    .from('messages')
+    .insert({
+      conversation_id: conversation.id,
+      sender_type: 'customer',
+      content_type: contentType,
+      content_text: initialContentText,
+      media_url: null,
+      message_id: message.id,
+      status: 'delivered',
+      created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+    })
+    .select()
+    .maybeSingle()
+
+  if (insertError || !earlyMsg) {
+    console.warn('[webhook] Atomic lock triggered - duplicate message aborted early:', message.id)
+    return
+  }
+
   const { data: config } = await supabaseAdmin()
     .from('whatsapp_config')
     .select('*')
@@ -495,17 +527,6 @@ async function processMessage(
   let imageBase64: string | null = null
   let isTranscriptionFailed = false 
 
-  // বাগ ফিক্স ১: স্কোপিং এরর প্রতিরোধে contentType ভেরিয়েবলটি শুরুতেই ডিক্লেয়ার করা হলো
-  let contentType: string = 'text'
-  const ALLOWED_CONTENT_TYPES = new Set([
-    'text', 'image', 'document', 'audio', 'video', 'location', 'template',
-  ])
-  contentType = ALLOWED_CONTENT_TYPES.has(message.type)
-    ? message.type
-    : message.type === 'sticker'
-      ? 'image'
-      : 'text'
-
   if (message.type === 'audio' && message.audio?.id && decryptedApiKey) {
     mediaUrl = `/api/whatsapp/media/${message.audio.id}`
     
@@ -516,7 +537,6 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        // টাইপ ও ইএসলিন্ট ফিক্স ৩: downloadResult টাইপ হিসেবে 'unknown' ব্যবহার করা হলো no-explicit-any এড়াতে
         let downloadResult: unknown = null
         let attempts = 0
         const maxAttempts = 3
@@ -530,7 +550,8 @@ async function processMessage(
               headers: { Authorization: `Bearer ${token}` },
               redirect: 'manual', // ডিরেক্ট রিডাইরেক্ট ব্লক করে হেডার ফরোয়ার্ডিং এড়ানো হলো
             })
-            if (res.status === 301 || res.status === 302 || res.status === 307) {
+            // ৩xx রিডাইরেকশন হ্যান্ডলিং
+            if (res.status >= 300 && res.status < 400) {
               const redirectUrl = res.headers.get('location')
               if (redirectUrl) {
                 // সিডিএন ডাউনলোড করার সময় কোনো Authorization হেডার পাঠানো হচ্ছে না (যাতে ৪০০ ব্যাড রিকোয়েস্ট না আসে)
@@ -546,22 +567,24 @@ async function processMessage(
           return null
         }
 
-        // রেস কন্ডিশন এড়াতে ডাইনামিক রিট্রাই লুপ
+        // রিট্রাই লুপ (প্রথমবার ইনস্ট্যান্ট ডাউনলোডের জন্য ফিক্সড - delayMs রিট্রাইয়ের সময় কেবল কাজ করবে)
         while (attempts < maxAttempts) {
-          attempts++
-          await new Promise((resolve) => setTimeout(resolve, delayMs))
+          if (attempts > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs))
+          }
           
           const tempResult = await safeDownload(verifiedUrlData.url, accessToken)
 
           if (tempResult) {
-            // বাগ ফিক্স: ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            // ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
             if (tempResult.byteLength > 500) {
               downloadResult = tempResult
               break
             } else {
-              console.warn(`[webhook] Audio download attempt ${attempts}: File too small (${tempResult.byteLength} bytes), retrying...`)
+              console.warn(`[webhook] Audio download attempt ${attempts + 1}: File too small (${tempResult.byteLength} bytes), retrying...`)
             }
           }
+          attempts++
         }
 
         // যদি ৩ বার প্রচেষ্টার পরও ফাইল ছোট থাকে, তবে অন্তিম বাফারকে ফলব্যাক হিসেবে ব্যবহার করবে
@@ -574,11 +597,20 @@ async function processMessage(
         }
         
         if (downloadResult) {
-          // বাগ ফিক্স ৪: Node ও Web API-এর মধ্যে টাইপসেফ অ্যারেবাফার থেকে ডাবল কাস্টিং এর মাধ্যমে Blob তৈরি করা হলো
-          // typescript visual compiler error (ts2322) সম্পূর্ণ দূর করতে unknown as BlobPart ব্যবহার করা হলো
-          const blob = new Blob([downloadResult as unknown as BlobPart], { type: 'audio/mpeg' })
+          // টাইপসেফ অ্যারেবাফার থেকে ফাইল বা ব্লব তৈরি করা হলো
+          let file: File | Blob
+          if (typeof File !== 'undefined') {
+            file = new File([downloadResult as ArrayBuffer], 'voice.mp3', { type: 'audio/mpeg' })
+          } else {
+            file = new Blob([downloadResult as ArrayBuffer], { type: 'audio/mpeg' })
+          }
+
           const formData = new FormData()
-          formData.append('file', blob, 'voice.mp3')
+          if (typeof File !== 'undefined') {
+            formData.append('file', file)
+          } else {
+            formData.append('file', file, 'voice.mp3')
+          }
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
@@ -647,25 +679,17 @@ async function processMessage(
     mediaUrl = parsed.mediaUrl
   }
 
-  // বাগ ফিক্স ৫ (First-Insert Lock): চ্যাট কম্পোনেন্টে কাস্টমার মেসেজটি শুরুতেই ডাটাবেজে ইনসার্ট করে সেভ করা হলো
-  const { data: tempMsg, error: insertError } = await supabaseAdmin()
+  // ২. সফল প্রসেসিং শেষে শুরুতে ইনসার্ট করা লক রো-টি আপডেট করি
+  const { error: updateError } = await supabaseAdmin()
     .from('messages')
-    .insert({
-      conversation_id: conversation.id,
-      sender_type: 'customer',
-      content_type: contentType,
+    .update({
       content_text: contentText,
       media_url: mediaUrl,
-      message_id: message.id,
-      status: 'delivered',
-      created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
     })
-    .select()
-    .maybeSingle()
+    .eq('id', earlyMsg.id)
 
-  if (insertError || !tempMsg) {
-    console.warn('[webhook] message insert failed or duplicate, aborting concurrent run:', insertError?.message)
-    return
+  if (updateError) {
+    console.error('[webhook] Failed to update message with final content:', updateError.message)
   }
 
   const { count: priorCustomerMsgCount } = await supabaseAdmin()
