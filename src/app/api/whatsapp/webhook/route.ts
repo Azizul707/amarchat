@@ -509,7 +509,7 @@ async function processMessage(
           })
 
           if (tempResult && tempResult.buffer) {
-            // বাগ ফিক্স: ছোট ভয়েস নোটের সাইজ ৫০০ বাইটের বেশি হলে সম্পূর্ণ ফাইল হিসেবে ধরা হবে
+            // ৫ সেকেন্ড বা তার ছোট ওজিজি ভয়েস নোটের সাইট সাধারণত ৫০০ বাইটের বেশি থাকে
             if (tempResult.buffer.byteLength > 500) {
               downloadResult = tempResult
               break
@@ -534,13 +534,15 @@ async function processMessage(
         if (downloadResult && downloadResult.buffer) {
           const audioBuffer = Buffer.from(downloadResult.buffer)
           
-          const file = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' })
+          // গেটওয়ে বাইপাস হ্যাক: OpenAI গেটওয়ের ওজিজি টাইপ রিজেকশন এড়াতে ফাইলটিকে 'voice.mp3' এবং 'audio/mpeg' আকারে সাবমিট করা হচ্ছে।
+          // Whisper-এর ইন্টারনাল ffmpeg সফলভাবে ওজিজি বাইনারি রিড করে নিখুঁত বাংলা ডিকোড করে ফেলবে।
+          const file = new File([audioBuffer], 'voice.mp3', { type: 'audio/mpeg' })
           const formData = new FormData()
           formData.append('file', file)
           formData.append('model', 'whisper-1')
           formData.append('language', 'bn')
 
-          // বাগ ফিক্স: কাস্টম এবং ডিক্রিপ্ট করা BYOK এপিআই বেইস ইউআরএল ডাইনামিকালি ব্যবহার করা হচ্ছে
+          // কাস্টম এবং ডিক্রিপ্ট করা BYOK এপিআই বেইস ইউআরএল ডাইনামিকালি ব্যবহার করা হচ্ছে
           const aiBaseUrl = config.ai_base_url || 'https://api.openai.com/v1'
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`

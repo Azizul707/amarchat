@@ -5,10 +5,10 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ mediaId: string }> } // ফোল্ডার নাম [mediaId] অনুযায়ী টাইপ সংশোধন
+  { params }: { params: Promise<{ mediaId: string }> }
 ) {
   try {
-    const { mediaId } = await params // params থেকে mediaId ডিস্ট্রাকচার করা হলো
+    const { mediaId } = await params
 
     if (!mediaId) {
       return NextResponse.json(
@@ -70,10 +70,15 @@ export async function GET(
       accessToken,
     })
 
+    // ব্রাউজার অডিও ডিউরেশন ও প্লেয়ার স্লাইডার ফিক্স:
+    // Content-Length এবং Accept-Ranges হেডার ব্যবহারের মাধ্যমে ব্রাউজারকে ডাইরেক্ট অডিও ফাইলের সাইজ জানানো হচ্ছে।
+    // এটি chunked transfer বন্ধ করে ব্রাউজারকে প্লে করার আগেই আসল ডিউরেশন (যেমন ০:১২) দেখাতে সাহায্য করে।
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
+        'Content-Length': buffer.byteLength.toString(), // ফাইলের সঠিক বাইট সাইজ
+        'Accept-Ranges': 'bytes', // ব্রাউজারকে ফাইল মেটাডেটা সিঙ্ক করার অনুমতি দেয়
         'Cache-Control': 'public, max-age=86400',
       },
     })
