@@ -2,10 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
-// নেক্সট.জেএস এবং Vercel এর এপিআই গেট (GET) ক্যাশিং সম্পূর্ণরূপে বন্ধ করার জন্য ডাইনামিক এক্সপোর্ট যুক্ত করা হলো
 export const dynamic = 'force-dynamic'
 
-// POST - Train AI (strictly 1-to-1 upsert per workspace_id)
+// POST - Train AI (strictly 1-to-1 upsert per workspace_id with Postgres uniqueness)
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -77,38 +76,20 @@ export async function POST(request: Request) {
     const embeddingData = await embeddingRes.json()
     const embeddingVector = embeddingData.data[0].embedding
 
-    // ১-টু-১ মেকানিজম: আগে থেকে কোনো নলেজ বেস আছে কি না চেক
-    const { data: existingDoc } = await supabase
+    // ১-টু-১ মেকানিজম: সুপাবেস অ্যাটমিক ডাইনামিক আপসেট (রেস-কন্ডিশন এড়াতে)
+    const { error: dbError } = await supabase
       .from('knowledge_base')
-      .select('id')
-      .eq('workspace_id', profile.workspace_id)
-      .maybeSingle()
-
-    let dbError = null
-
-    if (existingDoc) {
-      // আগের ডাটা নতুন ডাটা দিয়ে সম্পূর্ণ রিপ্লেস/আপডেট করা হচ্ছে
-      const { error } = await supabase
-        .from('knowledge_base')
-        .update({
-          content: content,
-          embedding: embeddingVector,
-          created_at: new Date().toISOString(),
-        })
-        .eq('workspace_id', profile.workspace_id)
-      dbError = error
-    } else {
-      // নতুন ডাটা ইনসার্ট
-      const { error } = await supabase.from('knowledge_base').insert({
+      .upsert({
         workspace_id: profile.workspace_id,
         content: content,
         embedding: embeddingVector,
+        created_at: new Date().toISOString(),
+      }, {
+        onConflict: 'workspace_id' // ওয়ান-টু-ওয়ান ইউনিকনেস কনস্ট্রেইন্ট ব্যবহার করা হচ্ছে
       })
-      dbError = error
-    }
 
     if (dbError) {
-      console.error('Database save failed:', dbError.message)
+      console.error('Database upsert failed:', dbError.message)
       return NextResponse.json({ error: 'Failed to save to database' }, { status: 500 })
     }
 
@@ -119,7 +100,7 @@ export async function POST(request: Request) {
   }
 }
 
-// GET - সুনির্দিষ্ট ওয়ার্কস্পেসের ১টি ইউনিক ডক রিটার্ন করবে
+// GET - সুনির্দিষ্ট ওয়ার্কস্পেসের ১টি ইউনিক ডক রিটার্ন করবে (ক্যাশ কন্ট্রোল হেডার সহ)
 export async function GET() {
   try {
     const supabase = await createClient()
@@ -143,13 +124,18 @@ export async function GET() {
       .from('knowledge_base')
       .select('id, content, created_at')
       .eq('workspace_id', profile.workspace_id)
-      .maybeSingle() // ১টি ডকই সিলেক্ট করা হচ্ছে
+      .maybeSingle()
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json(data || null, { status: 200 })
+    return NextResponse.json(data || null, { 
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store, max-age=0, must-revalidate' // এপিআই গেটওয়ে ক্যাশ প্রতিরোধক
+      }
+    })
   } catch (err) {
     console.error('Get Knowledge Base Error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -179,7 +165,7 @@ export async function DELETE() {
     const { error } = await supabase
       .from('knowledge_base')
       .delete()
-      .eq('workspace_id', profile.workspace_id) // ওনারের সব নলেজ একবারে ক্লিয়ার করবে
+      .eq('workspace_id', profile.workspace_id)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

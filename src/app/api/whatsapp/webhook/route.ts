@@ -750,8 +750,6 @@ async function processMessage(
         console.log('[webhook-ai] Fetching Knowledge Base directly by workspace_id to avoid RAG dilution:', conversation.workspace_id);
         
         // **১-টু-১ এন্টারপ্রাইজ ফিক্স (Direct exact select lookup)**: 
-        // যেহেতু amarchat-এ প্রতি মার্চেন্টের জন্য একটি ইউনিক নলেজ বেস রো থাকে, তাইCosine Similarity এর গাণিতিক হ্রাস (dilution)
-        // এড়াতে আমরা সরাসরি ১ মিলি সেকেন্ডে ডাটাবেজ থেকে কন্টেন্ট লোড করছি। এটি এআই-এর কাছে রিয়েল-টাইম তথ্য পৌঁছানো নিশ্চিত করে।
         const { data: kbRow, error: kbError } = await supabaseAdmin()
           .from('knowledge_base')
           .select('content')
@@ -832,6 +830,10 @@ async function processMessage(
         customHeaders['X-Title'] = 'amarchat CRM'
       }
 
+      // **মার্চেন্ট ডাইনামিক সিস্টেম প্রম্পট মার্জিং**:
+      // এখানে ডাটাবেজে মার্চেন্টের নিজের দেওয়া এআই সিস্টেম নির্দেশনাটি (config.ai_prompt) ডিফাইন করা হচ্ছে।
+      const baseSystemPrompt = config.ai_prompt || 'You are an expert sales and support assistant representing this business.'
+
       console.log(`[webhook-ai] Call to completions model: ${aiModel}`);
       const gptRes = await fetch(chatUrl, {
         method: 'POST',
@@ -841,18 +843,18 @@ async function processMessage(
           messages: [
             {
               role: 'system',
-              content: `You are "Lamia", an expert, highly polite, and professional sales and support assistant representing this specific business.
+              content: `${baseSystemPrompt}
 
 CRITICAL RULE FOR MULTI-TENANT SAAS ISOLATION:
 Your entire identity, scope of work, and product catalog are STRICTLY limited to the provided "BUSINESS KNOWLEDGE BASE" below. You must never assume, invent, or hallucinate any services, products, or offers that are not explicitly mentioned in the knowledge base.
 
 1. SCOPE OF ASSISTANCE:
 - You must carefully analyze the customer's query or sent image against the "BUSINESS KNOWLEDGE BASE".
-- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed in the knowledge base (e.g., sending a food picture like sweets/rosogolla to a seed/agricultural business, or asking about electronics at a clothing shop), you MUST politely and gently decline. Clarify in friendly Bangla that this business only deals in [Extract and state the main business scope from the knowledge base] and you cannot assist with other items.
+- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed in the knowledge base (e.g., sending a food picture like sweets/rosogolla to a seed/agricultural business, or asking about electronics at a clothing shop), you MUST politely and gently decline. Clarify in friendly Bangla that this business only deals in the scope listed in the knowledge base and you cannot assist with other items.
 - Never praise, negotiate, or confirm orders for products outside the knowledge base.
 
 2. IN-SCOPE SALES & SUPPORT:
-- If the request aligns with the knowledge base, be highly persuasive and friendly. Speak in a warm Bangla/Banglish blend, using respectful terms like "সম্মানিত ক্রেতা".
+- If the request aligns with the knowledge base, be highly persuasive and friendly. Speak in a warm Bangla/Banglish blend, using respectful terms.
 - Provide clear answers, assist in closing the sale, and offer any discount/combo structures if documented in the knowledge base.
 
 3. FALLBACK WHEN KNOWLEDGE BASE IS EMPTY OR NOT ACCESSIBLE:
@@ -1102,13 +1104,13 @@ async function findOrCreateConversation(userId: string, contactId: string) {
     return existing
   }
 
-  const { data: profile } = await supabaseAdmin()
+  const { data: profile = null } = await supabaseAdmin()
     .from('profiles')
     .select('workspace_id')
     .eq('user_id', userId)
     .maybeSingle()
 
-  const { data: newConv, error: createError } = await supabaseAdmin()
+  const { data: newConv = null, error: createError } = await supabaseAdmin()
     .from('conversations')
     .insert({
       user_id: userId,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Brain, Trash2, Loader2, Sparkles, BookOpen, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -13,6 +14,7 @@ interface Document {
 }
 
 export default function KnowledgeBaseSettings() {
+  const router = useRouter();
   const [document, setDocument] = useState<Document | null>(null);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -21,12 +23,15 @@ export default function KnowledgeBaseSettings() {
 
   const fetchDocument = useCallback(async () => {
     try {
-      const res = await fetch("/api/whatsapp/knowledge-base");
+      // ব্রাউজার ক্যাশ ও সিডিএন মেমোরি বাইপাস করতে ডাইনামিক টাইমস্ট্যাম্প ও no-store হেডার যুক্ত করা হলো
+      const res = await fetch(`/api/whatsapp/knowledge-base?t=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to load knowledge base");
       const data = await res.json();
       if (data) {
         setDocument(data);
-        setContent(data.content); // এডিটিং সহজ করতে টেক্সটএরিয়াতে ডাটা আগে থেকে বসানো হলো
+        setContent(data.content);
       } else {
         setDocument(null);
         setContent("");
@@ -64,7 +69,8 @@ export default function KnowledgeBaseSettings() {
       }
 
       toast.success("AI has been successfully trained with updated knowledge!");
-      fetchDocument();
+      router.refresh(); // নেক্সট রাউটার ক্যাশ ক্লিয়ার করা হলো
+      await fetchDocument();
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : "Training failed. Please try again.");
@@ -74,13 +80,12 @@ export default function KnowledgeBaseSettings() {
   };
 
   const handleClear = async () => {
-    // বাংলা ভাষায় অসাবধানতাবশত ডিলিট হওয়া রোধ করতে কনফার্মেশন পপ-আপ সেফগার্ড [1.2.7]
     const userConfirmed = window.confirm(
       "আপনি কি নিশ্চিত যে আপনি আপনার এআই সেলস অ্যাসিস্ট্যান্টের সমস্ত শেখানো তথ্য (Knowledge Base) সম্পূর্ণ মুছে ফেলতে চান?\n\nসতর্কতা: এই কাজটি আর ফিরিয়ে আনা যাবে না।"
     );
 
     if (!userConfirmed) {
-      return; // ইউজার Cancel বা ক্রস দিলে ডিলিট প্রসেস এখানেই বাতিল হয়ে যাবে
+      return;
     }
 
     setClearing(true);
@@ -92,6 +97,7 @@ export default function KnowledgeBaseSettings() {
       if (!res.ok) throw new Error("Clear failed");
 
       toast.success("Knowledge base cleared successfully.");
+      router.refresh(); // নেক্সট রাউটার ক্যাশ ক্লিয়ার করা হলো
       setDocument(null);
       setContent("");
     } catch (err) {
