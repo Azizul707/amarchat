@@ -309,7 +309,6 @@ function TeamForm() {
 // ==================== AI CONFIGURATION COMPONENT ====================
 function AIForm() {
   const [apiKey, setApiKey] = useState('');
-  const [appSecret, setAppSecret] = useState(''); // ডাইনামিক App Secret লোকাল স্টেট
   const [prompt, setPrompt] = useState('You are a helpful customer service assistant.');
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
   const [model, setModel] = useState('gpt-4o-mini');
@@ -324,7 +323,6 @@ function AIForm() {
         if (res.ok) {
           const data = await res.json();
           if (data.apiKey) setApiKey(data.apiKey);
-          if (data.appSecret) setAppSecret(data.appSecret); // ডাটাবেজ থেকে সিক্রেট কি রিসিভ করা হলো
           if (data.prompt) setPrompt(data.prompt);
           if (data.baseUrl) setBaseUrl(data.baseUrl);
           if (data.model) setModel(data.model);
@@ -347,7 +345,6 @@ function AIForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           apiKey: apiKey.trim(),
-          appSecret: appSecret.trim(), // এপিআই এ সেভ করার জন্য সিক্রেট পাঠানো হলো
           prompt: prompt.trim(),
           baseUrl: baseUrl.trim(),
           model: model.trim(),
@@ -399,21 +396,6 @@ function AIForm() {
           />
           <p className="text-[10px] text-slate-500 font-sans leading-normal">
             📌 আপনার অ্যাক্সেস কি-টি ডাটাবেসে সম্পূর্ণ এনক্রিপ্ট অবস্থায় সুরক্ষিত থাকবে।
-          </p>
-        </div>
-
-        {/* নতুন Meta App Secret ইনপুট বক্স */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-300">Meta App Secret (Client Verification)</label>
-          <input 
-            type="password" 
-            value={appSecret} 
-            onChange={(e) => setAppSecret(e.target.value)} 
-            className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-indigo-500 transition-colors" 
-            placeholder="Meta App Secret from Meta Developer Dashboard -> App Settings -> Basic"
-          />
-          <p className="text-[10px] text-slate-500 font-sans leading-normal">
-            📌 আপনার নিজস্ব মেটা অ্যাপের App Secret কোডটি এখানে দিন।
           </p>
         </div>
 

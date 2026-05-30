@@ -4,7 +4,7 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
 export const dynamic = 'force-dynamic'
 
-// GET - ডাটাবেজ থেকে এআই কনফিগ লোড এবং ডিক্রিপ্ট করা
+// GET - ডাটাবেজ থেকে শুধুমাত্র এআই কনফিগ লোড এবং ডিক্রিপ্ট করা (মেটা সিক্রেট মুক্ত)
 export async function GET() {
   try {
     const supabase = await createClient()
@@ -26,27 +26,17 @@ export async function GET() {
 
     const { data: config } = await supabase
       .from('whatsapp_config')
-      .select('openai_api_key, ai_prompt, ai_base_url, ai_model, app_secret')
+      .select('openai_api_key, ai_prompt, ai_base_url, ai_model')
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
 
     let decryptedApiKey = ''
-    let decryptedAppSecret = ''
 
-    if (config) {
-      if (config.openai_api_key) {
-        try {
-          decryptedApiKey = decrypt(config.openai_api_key)
-        } catch (err) {
-          console.error('Failed to decrypt OpenAI API Key:', err)
-        }
-      }
-      if (config.app_secret) {
-        try {
-          decryptedAppSecret = decrypt(config.app_secret)
-        } catch (err) {
-          console.error('Failed to decrypt Meta App Secret:', err)
-        }
+    if (config && config.openai_api_key) {
+      try {
+        decryptedApiKey = decrypt(config.openai_api_key)
+      } catch (err) {
+        console.error('Failed to decrypt OpenAI API Key:', err)
       }
     }
 
@@ -55,7 +45,6 @@ export async function GET() {
       prompt: config?.ai_prompt || 'You are a helpful customer service assistant.',
       baseUrl: config?.ai_base_url || 'https://api.openai.com/v1',
       model: config?.ai_model || 'gpt-4o-mini',
-      appSecret: decryptedAppSecret,
     }, { status: 200 })
   } catch (err) {
     console.error('GET AI Config Error:', err)
@@ -63,7 +52,7 @@ export async function GET() {
   }
 }
 
-// POST - এআই কনফিগ এবং অ্যাপ সিক্রেট ডাটাবেজে এনক্রিপ্ট করে সেভ/আপসেট করা
+// POST - এআই কনফিগ ডাটাবেজে এনক্রিপ্ট করে সেভ/আপসেট করা (মেটা সিক্রেট মুক্ত)
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -73,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { apiKey, prompt, baseUrl, model, appSecret } = await request.json()
+    const { apiKey, prompt, baseUrl, model } = await request.json()
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -86,13 +75,9 @@ export async function POST(request: Request) {
     }
 
     let encryptedApiKey = ''
-    let encryptedAppSecret = ''
 
     if (apiKey) {
       encryptedApiKey = encrypt(apiKey)
-    }
-    if (appSecret) {
-      encryptedAppSecret = encrypt(appSecret)
     }
 
     const { error } = await supabase
@@ -104,7 +89,6 @@ export async function POST(request: Request) {
         ai_prompt: prompt,
         ai_base_url: baseUrl,
         ai_model: model,
-        app_secret: encryptedAppSecret,
         status: 'active'
       }, {
         onConflict: 'workspace_id'

@@ -42,7 +42,10 @@ export function WhatsAppConfig() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  
   const [showToken, setShowToken] = useState(false);
+  const [showAppSecret, setShowAppSecret] = useState(false); // অ্যাপ সিক্রেট শো/হাইড স্টেট
+  
   const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
@@ -51,8 +54,11 @@ export function WhatsAppConfig() {
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
   const [accessToken, setAccessToken] = useState('');
+  const [appSecret, setAppSecret] = useState(''); // মেটা অ্যাপ সিক্রেট লোকাল স্টেট
   const [verifyToken, setVerifyToken] = useState('');
+  
   const [tokenEdited, setTokenEdited] = useState(false);
+  const [appSecretEdited, setAppSecretEdited] = useState(false); // অ্যাপ সিক্রেট এডিটিং স্টেট
 
   const webhookUrl =
     typeof window !== 'undefined'
@@ -62,7 +68,6 @@ export function WhatsAppConfig() {
   const fetchConfig = useCallback(async (userId: string) => {
     setLoading(true);
     try {
-      // Load form values from Supabase (shows what's in DB)
       const { data, error } = await supabase
         .from('whatsapp_config')
         .select('*')
@@ -78,18 +83,21 @@ export function WhatsAppConfig() {
         setPhoneNumberId(data.phone_number_id || '');
         setWabaId(data.waba_id || '');
         setAccessToken(MASKED_TOKEN);
-        setVerifyToken('');
+        setAppSecret(data.app_secret ? MASKED_TOKEN : ''); // অ্যাপ সিক্রেট আগে থেকে সেভ থাকলে মাস্ক করা হবে
+        setVerifyToken(data.verify_token || '');
         setTokenEdited(false);
+        setAppSecretEdited(false);
       } else {
         setConfig(null);
         setPhoneNumberId('');
         setWabaId('');
         setAccessToken('');
+        setAppSecret('');
         setVerifyToken('');
         setTokenEdited(false);
+        setAppSecretEdited(false);
       }
 
-      // Then verify health via the API (decrypts token + pings Meta)
       if (data) {
         try {
           const res = await fetch('/api/whatsapp/config', { method: 'GET' });
@@ -143,10 +151,6 @@ export function WhatsAppConfig() {
     try {
       setSaving(true);
 
-      // Always POST through the API — it verifies with Meta and encrypts
-      // the access_token server-side with ENCRYPTION_KEY. Skipping this
-      // and writing direct to Supabase stores the token in plaintext,
-      // which then fails decryption on every subsequent health check.
       const payload: Record<string, unknown> = {
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
@@ -155,14 +159,10 @@ export function WhatsAppConfig() {
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
         payload.access_token = accessToken.trim();
-      } else if (config) {
-        // Existing config — reuse stored encrypted token by decrypting on the
-        // server. But our POST handler requires an access_token to verify
-        // with Meta. If the user didn't change the token, we need to signal
-        // that. Simplest: require token re-entry if they're updating.
-        toast.error('Please re-enter the Access Token to save changes');
-        setSaving(false);
-        return;
+      }
+      
+      if (appSecretEdited && appSecret !== MASKED_TOKEN && appSecret.trim()) {
+        payload.app_secret = appSecret.trim();
       }
 
       const res = await fetch('/api/whatsapp/config', {
@@ -244,8 +244,10 @@ export function WhatsAppConfig() {
       setPhoneNumberId('');
       setWabaId('');
       setAccessToken('');
+      setAppSecret('');
       setVerifyToken('');
       setTokenEdited(false);
+      setAppSecretEdited(false);
       setConnectionStatus('disconnected');
       setResetReason(null);
       setStatusMessage('');
@@ -358,6 +360,41 @@ export function WhatsAppConfig() {
                 onChange={(e) => setWabaId(e.target.value)}
                 className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
               />
+            </div>
+
+            {/* নতুন Meta App Secret কাস্টম পাসওয়ার্ড ইনপুট ফিল্ড */}
+            <div className="space-y-2">
+              <Label className="text-slate-300">Meta App Secret (Client Verification)</Label>
+              <div className="relative">
+                <Input
+                  type={showAppSecret ? 'text' : 'password'}
+                  placeholder="Enter your Meta App Secret"
+                  value={appSecret}
+                  onChange={(e) => {
+                    setAppSecret(e.target.value);
+                    setAppSecretEdited(true);
+                  }}
+                  onFocus={() => {
+                    if (appSecret === MASKED_TOKEN) {
+                      setAppSecret('');
+                      setAppSecretEdited(true);
+                    }
+                  }}
+                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAppSecret(!showAppSecret)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                >
+                  {showAppSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+              {config && !appSecretEdited && (
+                <p className="text-xs text-slate-500">
+                  App Secret is hidden for security. Re-enter it to update configuration.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
