@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
-// GET - এআই কনফিগারেশন রিড করা (শুধুমাত্র এপ্রুভড ওনার ডিক্রিপ্ট করা কি দেখতে পাবেন)
+export const dynamic = 'force-dynamic'
+
+// GET - ডাটাবেজ থেকে এআই কনফিগ লোড এবং ডিক্রিপ্ট করা
 export async function GET() {
   try {
     const supabase = await createClient()
@@ -12,47 +14,56 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ওনার ভেরিফিকেশন (is_approved === true চেক)
     const { data: profile } = await supabase
       .from('profiles')
-      .select('workspace_id, is_approved')
+      .select('workspace_id')
       .eq('user_id', user.id)
       .maybeSingle()
 
-    if (!profile || !profile.is_approved) {
-      return NextResponse.json({ error: 'Unauthorized: Only approved owners can access AI settings' }, { status: 401 })
+    if (!profile?.workspace_id) {
+      return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
     }
 
-    const { data: config, error: configError } = await supabase
+    const { data: config } = await supabase
       .from('whatsapp_config')
-      .select('*')
+      .select('openai_api_key, ai_prompt, ai_base_url, ai_model, app_secret')
       .eq('workspace_id', profile.workspace_id)
       .maybeSingle()
 
-    if (configError) {
-      return NextResponse.json({ error: configError.message }, { status: 500 })
-    }
+    let decryptedApiKey = ''
+    let decryptedAppSecret = ''
 
-    if (!config) {
-      return NextResponse.json({}, { status: 200 })
+    if (config) {
+      if (config.openai_api_key) {
+        try {
+          decryptedApiKey = decrypt(config.openai_api_key)
+        } catch (err) {
+          console.error('Failed to decrypt OpenAI API Key:', err)
+        }
+      }
+      if (config.app_secret) {
+        try {
+          decryptedAppSecret = decrypt(config.app_secret)
+        } catch (err) {
+          console.error('Failed to decrypt Meta App Secret:', err)
+        }
+      }
     }
-
-    // এপিআই কি ডিক্রিপ্ট করে পাঠানো হচ্ছে (শুধুমাত্র এপ্রুভড ওনার ব্রাউজারে দেখতে পাবেন)
-    const decryptedApiKey = config.openai_api_key ? decrypt(config.openai_api_key) : ''
 
     return NextResponse.json({
       apiKey: decryptedApiKey,
-      prompt: config.ai_prompt || '',
-      baseUrl: config.ai_base_url || '',
-      model: config.ai_model || '',
+      prompt: config?.ai_prompt || 'You are a helpful customer service assistant.',
+      baseUrl: config?.ai_base_url || 'https://api.openai.com/v1',
+      model: config?.ai_model || 'gpt-4o-mini',
+      appSecret: decryptedAppSecret,
     }, { status: 200 })
   } catch (err) {
-    console.error('GET AI Settings Error:', err)
+    console.error('GET AI Config Error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-// POST - এআই কনফিগারেশন সেভ/আপডেট করা (শুধুমাত্র এপ্রুভড ওনার ডাটা সেভ করতে পারবেন)
+// POST - এআই কনফিগ এবং অ্যাপ সিক্রেট ডাটাবেজে এনক্রিপ্ট করে সেভ/আপসেট করা
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -62,66 +73,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ওনার ভেরিফিকেশন (is_approved === true চেক)
+    const { apiKey, prompt, baseUrl, model, appSecret } = await request.json()
+
     const { data: profile } = await supabase
       .from('profiles')
-      .select('workspace_id, is_approved')
+      .select('workspace_id')
       .eq('user_id', user.id)
       .maybeSingle()
 
-    if (!profile || !profile.is_approved) {
-      return NextResponse.json({ error: 'Unauthorized: Only approved owners can save AI settings' }, { status: 401 })
+    if (!profile?.workspace_id) {
+      return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
     }
 
-    const { apiKey, prompt, baseUrl, model } = await request.json()
+    let encryptedApiKey = ''
+    let encryptedAppSecret = ''
 
-    // এপিআই কি এনক্রিপ্ট করে সিকিউরডভাবে ডাটাবেজে সেভ করা হচ্ছে
-    const encryptedApiKey = apiKey ? encrypt(apiKey) : ''
+    if (apiKey) {
+      encryptedApiKey = encrypt(apiKey)
+    }
+    if (appSecret) {
+      encryptedAppSecret = encrypt(appSecret)
+    }
 
-    // ডাটাবেজে আগে থেকে কনফিগ আছে কি না চেক
-    const { data: existingConfig } = await supabase
+    const { error } = await supabase
       .from('whatsapp_config')
-      .select('id')
-      .eq('workspace_id', profile.workspace_id)
-      .maybeSingle()
+      .upsert({
+        workspace_id: profile.workspace_id,
+        user_id: user.id,
+        openai_api_key: encryptedApiKey,
+        ai_prompt: prompt,
+        ai_base_url: baseUrl,
+        ai_model: model,
+        app_secret: encryptedAppSecret,
+        status: 'active'
+      }, {
+        onConflict: 'workspace_id'
+      })
 
-    let dbError = null
-
-    if (existingConfig) {
-      // কনফিগ থাকলে আপডেট করা হচ্ছে
-      const { error } = await supabase
-        .from('whatsapp_config')
-        .update({
-          openai_api_key: encryptedApiKey,
-          ai_prompt: prompt,
-          ai_base_url: baseUrl,
-          ai_model: model,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('workspace_id', profile.workspace_id)
-      dbError = error
-    } else {
-      // কনফিগ না থাকলে নতুন ইনসার্ট করা হচ্ছে
-      const { error } = await supabase
-        .from('whatsapp_config')
-        .insert({
-          workspace_id: profile.workspace_id,
-          user_id: user.id,
-          openai_api_key: encryptedApiKey,
-          ai_prompt: prompt,
-          ai_base_url: baseUrl,
-          ai_model: model,
-        })
-      dbError = error
-    }
-
-    if (dbError) {
-      return NextResponse.json({ error: dbError.message }, { status: 500 })
+    if (error) {
+      console.error('Failed to save AI config:', error.message)
+      return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (err) {
-    console.error('POST AI Settings Error:', err)
+    console.error('POST AI Config Error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

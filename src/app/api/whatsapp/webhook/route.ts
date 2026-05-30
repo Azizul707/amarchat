@@ -1,10 +1,26 @@
 import { NextResponse, after } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import crypto from 'crypto' // ডাইনামিক সিগনেচার ভেরিফিকেশনের জন্য ক্রিপ্টো মডিউল
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
-import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
+
+// WhatsappConfigRow টাইপ-সেফ ইন্টারফেস (no-explicit-any এরর দূর করতে)
+interface WhatsappConfigRow {
+  id: string
+  workspace_id: string
+  user_id: string
+  phone_number_id: string
+  access_token?: string
+  verify_token?: string
+  openai_api_key?: string
+  ai_prompt?: string
+  ai_base_url?: string
+  ai_model?: string
+  app_secret?: string
+  status?: string
+}
 
 // MatchedConfig টাইপ-সেফ ইন্টারফেস
 interface MatchedConfigRow {
@@ -92,6 +108,23 @@ interface WhatsAppWebhookEntry {
   }>
 }
 
+// ডাইনামিক সিগনেচার কম্পারিসন (মেটা ওয়েব হুক সিকিউরিটি প্রটেকশন)
+function verifyDynamicSignature(rawBody: string, signature: string | null, appSecret: string): boolean {
+  if (!signature) return false
+  const parts = signature.split('=')
+  if (parts.length !== 2) return false
+  const expectedSignature = parts[1]
+
+  const hmac = crypto.createHmac('sha256', appSecret)
+  const actualSignature = hmac.update(rawBody).digest('hex')
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(actualSignature), Buffer.from(expectedSignature))
+  } catch {
+    return false
+  }
+}
+
 // গ্লোবাল সেফ ডাউনলোডার (User-Agent spoofing ও ৩xx রিডাইরেক্ট রি-ফরোয়ার্ডিং বাগ মুক্ত)
 async function safeDownload(url: string, token: string): Promise<ArrayBuffer | null> {
   try {
@@ -100,7 +133,7 @@ async function safeDownload(url: string, token: string): Promise<ArrayBuffer | n
       method: 'GET',
       headers: { 
         'Authorization': `Bearer ${token}`,
-        'User-Agent': 'curl/7.64.1' // ফেসবুকের সিকিউরিটি বাইপাস করতে ইউজার এজেন্ট মাস্ট
+        'User-Agent': 'curl/7.64.1'
       },
       redirect: 'manual',
     })
@@ -191,16 +224,49 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
-  if (!verifyMetaWebhookSignature(rawBody, signature)) {
-    console.warn('[webhook] Rejected request: Invalid signature')
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-  }
-
   let body: { entry?: WhatsAppWebhookEntry[] }
   try {
     body = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  // ১. ডাইনামিক সিগনেচার ভেরিফিকেশনের জন্য phone_number_id রিড করি
+  let phoneNumberId = ''
+  try {
+    phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id || ''
+  } catch {
+    // ignore
+  }
+
+  let config: WhatsappConfigRow | null = null
+  if (phoneNumberId) {
+    const { data } = await supabaseAdmin()
+      .from('whatsapp_config')
+      .select('*')
+      .eq('phone_number_id', phoneNumberId)
+      .maybeSingle()
+    config = data as WhatsappConfigRow | null
+  }
+
+  // ২. কাস্টমারের নিজস্ব app_secret লোড করা, না থাকলে গ্লোবাল .env.local সিক্রেট ব্যবহার করা (100% backward compatible)
+  let decryptedAppSecret = ''
+  if (config && config.app_secret) {
+    try {
+      decryptedAppSecret = decrypt(config.app_secret)
+    } catch (err) {
+      console.error('[webhook-sig] Failed to decrypt custom app_secret:', err)
+    }
+  }
+
+  if (!decryptedAppSecret) {
+    decryptedAppSecret = process.env.META_APP_SECRET || ''
+  }
+
+  // ৩. ডাইনামিক সিগনেচার ভেরিফিকেশন রান করা হলো
+  if (!verifyDynamicSignature(rawBody, signature, decryptedAppSecret)) {
+    console.warn('[webhook] Rejected request: Dynamic signature validation failed.')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   // মেটা-কে instantly HTTP 200 দিয়ে দেওয়া হচ্ছে যাতে ডুপ্লিকেট retry জেনারেট না হয়।
@@ -831,7 +897,6 @@ async function processMessage(
       }
 
       // **মার্চেন্ট ডাইনামিক সিস্টেম প্রম্পট মার্জিং**:
-      // এখানে ডাটাবেজে মার্চেন্টের নিজের দেওয়া এআই সিস্টেম নির্দেশনাটি (config.ai_prompt) ডিফাইন করা হচ্ছে।
       const baseSystemPrompt = config.ai_prompt || 'You are an expert sales and support assistant representing this business.'
 
       console.log(`[webhook-ai] Call to completions model: ${aiModel}`);
