@@ -56,7 +56,7 @@ interface MessageContentImage {
 
 type MessageContent = MessageContentText | MessageContentImage
 
-// গুগল শিট ডাটা রিড করার জন্য ইন্টারফেসসমূহ
+// গুগল শিট ডিক্লেয়ারেশন ইন্টারফেস
 interface GvizCol {
   label: string
 }
@@ -68,7 +68,7 @@ interface GvizRow {
   c: (GvizCell | null)[]
 }
 
-// OpenAI Function Tool types
+// OpenAI Tool Call টাইপ
 interface ToolCall {
   id: string
   type: 'function'
@@ -536,14 +536,13 @@ async function sendWhatsAppMessage(
       const errBody = await res.json().catch(() => ({}))
       console.error('[webhook-send] Meta API message send failed:', errBody)
     } else {
-      console.log('[webhook-send] WhatsApp response sent successfully to customer.')
+      console.log('[webhook-send] WhatsApp response sent successfully.')
     }
   } catch (err) {
     console.error('[webhook-send] Exception during WhatsApp send:', err)
   }
 }
 
-// কাস্টমারকে মিডিয়া (ইমেজ ও ক্যাপশন) রেসপন্স পাঠানোর জন্য অফিসিয়াল এপিআই মেথড
 async function sendWhatsAppImageMessage(
   phone: string,
   imageUrl: string,
@@ -575,14 +574,13 @@ async function sendWhatsAppImageMessage(
       const errBody = await res.json().catch(() => ({}))
       console.error('[webhook-send] Meta API image send failed:', errBody)
     } else {
-      console.log('[webhook-send] WhatsApp Image response sent successfully to customer.')
+      console.log('[webhook-send] WhatsApp Image response sent successfully.')
     }
   } catch (err) {
     console.error('[webhook-send] Exception during WhatsApp Image send:', err)
   }
 }
 
-// গুগল শিটের ইনভেন্টরি বা পণ্য তালিকা রিড করার ড্রাইভার ফাংশন
 async function fetchGoogleSheetInventory(sheetId: string): Promise<string> {
   try {
     console.log('[google-sheets] Fetching inventory rows from Sheet ID:', sheetId)
@@ -620,7 +618,6 @@ async function fetchGoogleSheetInventory(sheetId: string): Promise<string> {
   }
 }
 
-// গুগল অ্যাপস স্ক্রিপ্ট ব্যবহার করে গুগল শিটের Orders ট্যাবে রিয়েল-টাইম নতুন সারি যোগ করার ড্রাইভার
 async function appendOrderToGoogleSheet(appsScriptUrl: string, orderDetails: Record<string, unknown>): Promise<boolean> {
   try {
     console.log('[google-sheets] Appending new order row to Apps Script Web App...')
@@ -633,7 +630,7 @@ async function appendOrderToGoogleSheet(appsScriptUrl: string, orderDetails: Rec
     })
     
     if (res.ok) {
-      console.log('[google-sheets] Order successfully appended to marchant spreadsheet.')
+      console.log('[google-sheets] Order successfully appended.')
       return true
     }
     console.error('[google-sheets] Append endpoint error:', res.status)
@@ -970,12 +967,33 @@ async function processMessage(
         }
       }
 
-      // **৩. সুরক্ষিত গুগল শিট ইন্টিগ্রেশন চেক** (Tenant Isolation: Multi-Device Sync Safe)
+      // ১. সুরক্ষিত গুগল শিট ইন্টিগ্রেশন চেক
       const { data: sheetsIntegration } = await supabaseAdmin()
         .from('workspace_integrations')
         .select('*')
         .eq('workspace_id', conversation.workspace_id)
         .maybeSingle()
+
+      // **২. ডাইনামিক চ্যাট মেমোরি ফিক্স (Fetching last 15 messages chronological history)**
+      const { data: pastMessages, error: historyError } = await supabaseAdmin()
+        .from('messages')
+        .select('sender_type, content_text')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: false })
+        .limit(15)
+
+      const chatHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
+      if (!historyError && pastMessages) {
+        const chronological = [...pastMessages].reverse()
+        chronological.forEach((msg) => {
+          if (msg.content_text) {
+            chatHistory.push({
+              role: msg.sender_type === 'customer' ? 'user' : 'assistant',
+              content: msg.content_text,
+            })
+          }
+        })
+      }
 
       const userMessageContent: MessageContent[] = []
       
@@ -987,7 +1005,7 @@ async function processMessage(
       } else if (message.type === 'image') {
         userMessageContent.push({ 
           type: 'text', 
-          text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটি বিশ্লেষণ করুন। কঠোর নিয়ম: যদি ছবিটি এই ব্যবসার নলেজবেজ বা ডোমেইনের সাথে সরাসরি সম্পর্কিত হয় (যেমন: আপনার নিজস্ব পণ্য, পেমেন্ট স্ক্রিনশট, অর্ডার রিসিট, বা ত্রুটিপূর্ণ পণ্য), তবে নলেজবেজ অনুসরণ করে বাংলায় গ্রাহককে সহায়তা করুন। আর যদি ছবিটি ব্যবসার বাইরের সম্পূর্ণ অপ্রাসঙ্গিক কোনো বিষয় হয় (যেমন: মিম, সেফি, বিনোদনমূলক বা অন্য কোনো অবান্তর ছবি), তবে কোনোভাবেই ওই অবান্তর ছবি নিয়ে আলোচনায় মাতবেন না। অত্যন্ত ভদ্রভাবে বাংলায় দুঃখ প্রকাশ করে বলুন যে আপনি কেবল এই নির্দিষ্ট ব্যবসার পণ্য ও সেবা সংক্রান্ত বিষয়ে সাহায্য করতে পারেন এবং তাকে ব্যবসার বিষয় নিয়ে কথা বলতে অনুরোধ করুন।' 
+          text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটি বিশ্লেষণ করুন। কঠোর নিয়ম: যদি ছবিটি এই ব্যবসার নলেজবেজ বা ডোমেইনের সাথে সরাসরি সম্পর্কিত হয় (যেমন: আপনার নিজস্ব পণ্য, পেমেন্ট স্ক্রিনশট, অর্ডার রিসিট, বা ত্রুটিপূর্ণ পণ্য), তবে নলেজবেজ অনুসরণ করে বাংলায় গ্রাহককে সহায়তা করুন। আর যদি ছবিটি ব্যবসার বাইরের সম্পূর্ণ অপ্রাসঙ্গিক কোনো বিষয় হয় (যেমন: মিম, সেলফি, বিনোদনমূলক বা অন্য কোনো অবান্তর ছবি), তবে কোনোভাবেই ওই অবান্তর ছবি নিয়ে আলোচনায় মাতবেন না। অত্যন্ত ভদ্রভাবে বাংলায় দুঃখ প্রকাশ করে বলুন যে আপনি কেবল এই নির্দিষ্ট ব্যবসার পণ্য ও সেবা সংক্রান্ত বিষয়ে সাহায্য করতে পারেন এবং তাকে ব্যবসার বিষয় নিয়ে কথা বলতে অনুরোধ করুন।' 
         })
       } else if (contentText) {
         userMessageContent.push({ type: 'text', text: contentText })
@@ -1015,7 +1033,6 @@ async function processMessage(
 
       const baseSystemPrompt = config.ai_prompt || 'You are an expert sales and support assistant representing this business.'
 
-      // ডাইনামিক এআই এজেন্ট টুল ডেফিনিশন (গুগল শিট কানেক্ট করা থাকলে স্বয়ংক্রিয়ভাবে সক্রিয় হবে)
       const aiTools: unknown[] = []
       if (sheetsIntegration && sheetsIntegration.google_sheet_id) {
         aiTools.push({
@@ -1038,7 +1055,7 @@ async function processMessage(
             type: 'function',
             function: {
               name: 'create_order',
-              description: 'Appends a new verified customer order to the marchant\'s live Google Sheet database. CRITICAL: You must collect Customer Name, Phone, Address, Product SKU/Name, and optionally Color/Size/Quantity details before calling this. If some fields are missing, ask the customer for them first.',
+              description: 'Appends a new verified customer order to the merchant\'s live Google Sheet database. CRITICAL: You must collect Customer Name, Phone, Address, Product SKU/Name, and optionally Color/Size/Quantity details before calling this. If some fields are missing, ask the customer for them first.',
               parameters: {
                 type: 'object',
                 properties: {
@@ -1057,7 +1074,7 @@ async function processMessage(
         }
       }
 
-      console.log(`[webhook-ai] Call to completions model: ${aiModel}`);
+      // **৩. আপনার গ্রিনএগ্রি (GreenAgri) প্রম্পটের সফল ডাইনামিক রূপান্তর**
       const aiPayload: Record<string, unknown> = {
         model: aiModel,
         messages: [
@@ -1065,26 +1082,44 @@ async function processMessage(
             role: 'system',
             content: `${baseSystemPrompt}
 
-CRITICAL RULE FOR MULTI-TENANT SAAS ISOLATION:
-Your entire identity, scope of work, and product catalog are STRICTLY limited to the provided "BUSINESS KNOWLEDGE BASE" below and any live products returned from your "search_products" tool. You must never assume, invent, or hallucinate any services, products, or offers that are not explicitly mentioned.
+Always address the customer politely (called "সম্মানিত গ্রাহক"). 
+NEVER save polite terms ("ভাইয়া", "আপু", "স্যার", "Customer") as their actual name in the database.
 
-1. SCOPE OF ASSISTANCE:
-- You must carefully analyze the customer's query or sent image.
-- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed, politely and gently decline. Clarify in friendly Bangla that this business only deals in the scope listed and you cannot assist with other items.
+GREETING & DOMAIN RULES (CRITICAL):
+- Greetings: If a customer just says "Hi", "Hello", "Assalamu Alaikum", or "দাম কত?", warmly greet them back in Bangla and ask how you can help them with our products today.
+- Domain Restriction: You are limited to discussing our specific business products, services, and ordering. Only use the Out-of-Domain refusal if they explicitly ask about unrelated topics.
+- Refusal Example: "দুঃখিত, আমি আমাদের সাপোর্ট এজেন্ট। আমি শুধুমাত্র আমাদের পণ্য এবং সেবা সম্পর্কিত বিষয় ছাড়া অন্য কোনো তথ্য দিতে পারি না।"
 
-2. MEDIA RESPONSE WORKFLOW:
-- If you find an image URL during the product search, you MUST output the image URL in this strict bracket format inside your text reply: [MEDIA_URL:https://example.com/product-image.png].
-- Do not hide or alter this brackets tag; our API wrapper reads this token to send native WhatsApp photo attachments!
+PRODUCT INVENTORY & IMAGES (CRITICAL):
+- If the customer asks "কী কী পণ্য আছে?", "দাম কত?", or wants to see photos, you MUST immediately call the "search_products" tool.
+- Never guess, estimate, or invent product specifications or prices. Always fetch from sheets.
+- CRITICAL MEDIA RULE: If you find an image URL during the product search, you MUST output the image URL in this strict bracket format inside your text reply: [MEDIA_URL:https://example.com/product-image.png]. Do not hide or alter this brackets tag; our system reads this token to send native photo attachments!
 
-3. GOOGLE SHEET ORDER FORMULATION:
-- If a client wants to order, check what details you have. If details like size, color, quantity, address, or phone are missing, politely ask the customer: "দয়া করে আপনার জামার সাইজ এবং কালারটি বলুন।" before confirming.
-- Once all fields are confirmed, call the "create_order" tool to log the order in the merchant's live Spreadsheet database.
+NEVER HALLUCINATE:
+- You are allowed to provide information ONLY if it exists in the provided Business Knowledge Base or live Google Sheets catalog. If the info is missing, politely say you do not have that specific information.
 
-BUSINESS KNOWLEDGE BASE:
----------------------
-${matchedContext || ''}
----------------------`
+ORDER FUNNEL & STRICT DATA COLLECTION:
+- Act like a smart telesales executive. To confirm an order, you MUST collect 3 distinct pieces of information:
+  1. Real Name (আসল নাম)
+  2. 11-digit Phone Number (Must start with 01)
+  3. Full Delivery Address (Must contain area/village, thana, district)
+- Step 1: If they express interest or select a package, DO NOT CONFIRM. Actively ask for their missing details: "অর্ডারটি কনফার্ম করতে দয়া করে আপনার সুন্দর নামটি, কন্টাক্ট নাম্বার এবং সম্পূর্ণ ঠিকানাটি দিন।"
+- Step 2 (Partial Info Validation):
+  * If they give a phone number and address but NO name, reply: "ধন্যবাদ সম্মানিত গ্রাহক! কুরিয়ারের জন্য দয়া করে আপনার আসল নামটি জানাবেন।"
+  * If the address is too short, ask for full address (area, thana, district).
+  * If the phone number is invalid, ask for a valid 11-digit number starting with 01.
+
+ORDER CONFIRMATION & SAVING PROTOCOL:
+- ONLY when you have the Real Name, Phone Number, Full Address, and Product Choice in the chat:
+  * FIRST: Use the 'create_order' tool (Google Sheets Append) to save their data. Pass the exact real name, phone, address, and product.
+  * SECOND: After the tool saves the data, reply with the final confirmation and mini-invoice. Format the bill neatly using LINE BREAKS.
+  * Never use "BDT". Always use "টাকা". Use "আসসালামু আলাইকুম", "ইনশাআল্লাহ", "আলহামদুলিল্লাহ" naturally. Always use Line Breaks (Enter) for invoices.
+
+HUMAN HANDOVER:
+- If a customer becomes angry, confused, or asks to talk to a human, say: "আমি এখনই আমাদের একজন এক্সপার্টকে আপনার সাথে কানেক্ট করে দিচ্ছি। دয়া করে একটু অপেক্ষা করুন।" Then stop replying.`
           },
+          // পূর্ববর্তী চ্যাট ইতিহাস ডাইনামিকালি ইনজেক্ট করা হচ্ছে (যাতে এআই ১ সেকেন্ড আগের কথা ভুলে না যায়)
+          ...chatHistory.filter((h) => h.content !== contentText), // ডুপ্লিকেট কারেন্ট মেসেজ ওভারল্যাপ এড়ানো হচ্ছে
           {
             role: 'user',
             content: userMessageContent
@@ -1098,18 +1133,18 @@ ${matchedContext || ''}
         aiPayload.tools = aiTools
       }
 
-      let gptRes = await fetch(chatUrl, {
+      const gptRes = await fetch(chatUrl, {
         method: 'POST',
         headers: customHeaders,
         body: JSON.stringify(aiPayload),
       })
 
       if (gptRes.ok) {
-        let gptData = await gptRes.json()
-        let choice = gptData.choices[0]
+        const gptData = await gptRes.json()
+        const choice = gptData.choices[0]
         let aiMessage = choice.message
 
-        // **৪. টুল কলিং (Function Calling) লুপ হ্যান্ডলার**
+        // ৪.ツールコーリング (Function Calling) ループハンドラー
         if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
           console.log('[webhook-ai] Tool call requested by GPT model.');
           const toolResults: unknown[] = []
@@ -1136,7 +1171,6 @@ ${matchedContext || ''}
             })
           }
 
-          // টুল রেজাল্টসহ এআই-এর কাছে সেকেন্ড completions কল পাঠানো হচ্ছে
           console.log('[webhook-ai] Submitting tool execution feedback to completions API...');
           const secondRes = await fetch(chatUrl, {
             method: 'POST',
@@ -1154,7 +1188,7 @@ ${matchedContext || ''}
           })
 
           if (secondRes.ok) {
-            const secondData = await secondRes.ok ? await secondRes.json() : null
+            const secondData = await secondRes.json()
             if (secondData) {
               aiMessage = secondData.choices[0].message
             }
@@ -1167,18 +1201,16 @@ ${matchedContext || ''}
         const aiReplyText = aiMessage.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
         console.log('[webhook-ai] Success response:', aiReplyText);
 
-        // **৫. হোয়াটসঅ্যাপ মিডিয়া এপিআই ট্রানজিশন** (Extracting custom bracket tags)
+        // ৫. হোয়াটসঅ্যাপ মিডিয়া এপিআই ট্রানজিশন
         const mediaRegex = /\[MEDIA_URL:(https?:\/\/[^\]]+)\]/i
         const mediaMatch = aiReplyText.match(mediaRegex)
 
         if (mediaMatch && mediaMatch[1]) {
-          // ইমেজের স্যাম্পল ইউআরএল পাওয়া গেলে কাস্টমারকে ডাইরেক্ট ইমেজ মেসেজ উইথ ক্যাপশন পাঠানো হবে
           const imageUrl = mediaMatch[1].trim()
           const cleanCaption = aiReplyText.replace(mediaRegex, '').trim()
           
           await sendWhatsAppImageMessage(senderPhone, imageUrl, cleanCaption, phoneNumberId, accessToken)
         } else {
-          // সাধারণ টেক্সট মেসেজ পাঠানো
           await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
         }
 
