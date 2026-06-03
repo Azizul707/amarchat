@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Loader2, RefreshCw, Image as ImageIcon, Video, FileText } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
@@ -50,26 +50,22 @@ interface TemplateFormData {
   language: string;
   body_text: string;
   header_type: string;
+  header_text: string;         // For text-type header
+  header_media_url: string;    // For image/video/document media-type header
   footer_text: string;
 }
 
-// Meta's language codes are exact — "en" and "en_US" are distinct and a
-// template approved under one will be rejected if you send with the other
-// (Graph API error #132001 "Template name does not exist in the
-// translation"). Default to en_US to match the DB default on
-// message_templates.language and the broadcasts sender's fallback.
 const emptyForm: TemplateFormData = {
   name: '',
   category: 'Marketing',
   language: 'en_US',
   body_text: '',
-  header_type: '',
+  header_type: 'none',
+  header_text: '',
+  header_media_url: '',
   footer_text: '',
 };
 
-// Common Meta template language codes. The field still accepts any
-// string — this just offers autocomplete for the usual suspects. Full
-// list: https://developers.facebook.com/docs/whatsapp/api/messages/message-templates#supported-languages
 const COMMON_LANGUAGE_CODES = [
   'en_US',
   'en_GB',
@@ -99,6 +95,7 @@ export function TemplateManager() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
 
   useEffect(() => {
@@ -108,7 +105,6 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(user.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
 
   async function fetchTemplates(userId: string) {
@@ -141,6 +137,22 @@ export function TemplateManager() {
       return;
     }
 
+    // Header Content Validation based on Header Type
+    let finalHeaderContent: string | null = null;
+    if (form.header_type === 'text') {
+      if (!form.header_text.trim()) {
+        toast.error('Header text is required');
+        return;
+      }
+      finalHeaderContent = form.header_text.trim();
+    } else if (['image', 'video', 'document'].includes(form.header_type as string)) {
+      if (!form.header_media_url.trim()) {
+        toast.error(`Please upload a sample ${form.header_type} or provide a media URL`);
+        return;
+      }
+      finalHeaderContent = form.header_media_url.trim();
+    }
+
     try {
       setSaving(true);
       if (!user) {
@@ -154,7 +166,8 @@ export function TemplateManager() {
         category: form.category,
         language: form.language.trim() || 'en_US',
         body_text: form.body_text.trim(),
-        header_type: form.header_type || null,
+        header_type: (form.header_type as string) === 'none' ? null : (form.header_type as MessageTemplate['header_type']),
+        header_content: finalHeaderContent,
         footer_text: form.footer_text.trim() || null,
         status: 'Draft' as const,
       };
@@ -177,12 +190,40 @@ export function TemplateManager() {
     }
   }
 
-  /**
-   * Pull approved templates from Meta and upsert them into the local
-   * catalog. After this runs, every local row is guaranteed to match
-   * something Meta will actually accept on send — stops users getting
-   * stuck on error #132001 "Template name does not exist".
-   */
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploading(true);
+      toast.loading(`Uploading sample ${form.header_type}...`);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+      const filePath = `templates/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('templates')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('templates')
+        .getPublicUrl(filePath);
+
+      setForm((prev) => ({ ...prev, header_media_url: publicUrl }));
+      toast.dismiss();
+      toast.success('Sample media uploaded successfully');
+    } catch (err) {
+      console.error('Media upload error:', err);
+      toast.dismiss();
+      toast.error('Upload failed. Ensure the storage bucket "templates" exists.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function handleSyncFromMeta() {
     if (!user) return;
     setSyncing(true);
@@ -201,27 +242,20 @@ export function TemplateManager() {
             : ''),
       );
       if (Array.isArray(data.errors) && data.errors.length > 0) {
-        // Surface per-template failures so users don't trust a green
-        // toast that hides silent drift.
         const preview = data.errors.slice(0, 3).map(
           (e: { name: string; language: string; message: string }) =>
             `${e.name} (${e.language})`,
         );
-        const suffix =
-          data.errors.length > 3 ? `, +${data.errors.length - 3} more` : '';
+        const suffix = data.errors.length > 3 ? `, +${data.errors.length - 3} more` : '';
         toast.error(`Failed to sync: ${preview.join(', ')}${suffix}`);
       }
       if (data.truncated) {
-        toast.warning(
-          'Hit Meta pagination cap — more templates may exist. Contact support if this persists.',
-        );
+        toast.warning('Hit Meta pagination cap — more templates may exist.');
       }
       await fetchTemplates(user.id);
     } catch (err) {
       console.error('Template sync error:', err);
-      toast.error(
-        err instanceof Error ? err.message : 'Failed to sync templates',
-      );
+      toast.error(err instanceof Error ? err.message : 'Failed to sync templates');
     } finally {
       setSyncing(false);
     }
@@ -242,6 +276,15 @@ export function TemplateManager() {
       toast.error('Failed to delete template');
     }
   }
+
+  const getHeaderIcon = (type?: string) => {
+    switch (type) {
+      case 'image': return <ImageIcon className="size-4 text-violet-400" />;
+      case 'video': return <Video className="size-4 text-emerald-400" />;
+      case 'document': return <FileText className="size-4 text-blue-400" />;
+      default: return null;
+    }
+  };
 
   if (loading) {
     return (
@@ -270,9 +313,7 @@ export function TemplateManager() {
             className="border-slate-700 bg-transparent text-slate-300 hover:bg-slate-800"
             title="Pull approved templates from your Meta WhatsApp Business Account"
           >
-            <RefreshCw
-              className={`size-4 ${syncing ? 'animate-spin' : ''}`}
-            />
+            <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Syncing…' : 'Sync from Meta'}
           </Button>
           <Button
@@ -303,16 +344,18 @@ export function TemplateManager() {
                 <div className="space-y-2 min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-medium text-white">{template.name}</h3>
-                    <Badge
-                      className={`text-xs border ${categoryColors[template.category] || ''}`}
-                    >
+                    <Badge className={`text-xs border ${categoryColors[template.category] || ''}`}>
                       {template.category}
                     </Badge>
-                    <Badge
-                      className={`text-xs border ${statusColors[template.status || 'Draft'] || ''}`}
-                    >
+                    <Badge className={`text-xs border ${statusColors[template.status || 'Draft'] || ''}`}>
                       {template.status || 'Draft'}
                     </Badge>
+                    {template.header_type && (template.header_type as string) !== 'none' && (
+                      <Badge variant="outline" className="text-xs border-slate-700 text-slate-300 flex items-center gap-1 bg-slate-800/40">
+                        {getHeaderIcon(template.header_type)}
+                        <span className="capitalize">{template.header_type}</span>
+                      </Badge>
+                    )}
                     {template.language && (
                       <span className="text-xs text-slate-500 uppercase">{template.language}</span>
                     )}
@@ -338,15 +381,16 @@ export function TemplateManager() {
 
       {/* New Template Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="bg-slate-900 border-slate-700 sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="bg-slate-900 border-slate-700 sm:max-w-lg flex flex-col max-h-[90vh]">
+          <DialogHeader className="shrink-0 pb-2 border-b border-slate-800/60">
             <DialogTitle className="text-white">New Message Template</DialogTitle>
             <DialogDescription className="text-slate-400">
               Create a new WhatsApp message template.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          {/* Scrollable Form Body */}
+          <div className="flex-1 overflow-y-auto pr-1 py-4 space-y-4 min-h-0 scrollbar-thin scrollbar-thumb-zinc-800">
             <div className="space-y-2">
               <Label className="text-slate-300">Template Name</Label>
               <Input
@@ -393,10 +437,8 @@ export function TemplateManager() {
                     <option key={code} value={code} />
                   ))}
                 </datalist>
-                <p className="text-[11px] text-slate-500">
-                  Must match the exact language code the template is approved
-                  under on Meta — e.g. <code>en_US</code> and <code>en</code>{' '}
-                  are distinct.
+                <p className="text-[11px] text-slate-500 leading-tight">
+                  Must match the exact language code — e.g. <code>en_US</code> and <code>en</code> are distinct.
                 </p>
               </div>
             </div>
@@ -405,7 +447,7 @@ export function TemplateManager() {
               <Label className="text-slate-300">Header Type</Label>
               <Select
                 value={form.header_type}
-                onValueChange={(val) => setForm({ ...form, header_type: val || '' })}
+                onValueChange={(val) => setForm({ ...form, header_type: val || 'none' })}
               >
                 <SelectTrigger className="w-full bg-slate-800 border-slate-700 text-white">
                   <SelectValue placeholder="None" />
@@ -423,6 +465,64 @@ export function TemplateManager() {
               </Select>
             </div>
 
+            {/* CASE 1: TEXT HEADER INPUT */}
+            {form.header_type === 'text' && (
+              <div className="space-y-2">
+                <Label className="text-slate-300">Header Text</Label>
+                <Input
+                  placeholder="Enter header text (e.g. Welcome to our shop)"
+                  value={form.header_text}
+                  onChange={(e) => setForm({ ...form, header_text: e.target.value })}
+                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+                />
+              </div>
+            )}
+
+            {/* CASE 2: DYNAMIC MEDIA UPLOADER */}
+            {['image', 'video', 'document'].includes(form.header_type as string) && (
+              <div className="space-y-3 p-3 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="flex items-center gap-2">
+                  {getHeaderIcon(form.header_type)}
+                  <Label className="text-xs font-bold text-slate-300 uppercase tracking-wide">
+                    {form.header_type} Sample attachment
+                  </Label>
+                </div>
+                <div className="space-y-2.5">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-400">Media Public URL</Label>
+                    <Input
+                      type="text"
+                      placeholder={`Paste sample ${form.header_type} direct URL`}
+                      value={form.header_media_url}
+                      onChange={(e) => setForm({ ...form, header_media_url: e.target.value })}
+                      className="bg-slate-800 border-slate-700 text-white text-xs placeholder:text-slate-600 h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] text-slate-400">Or Upload File</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept={
+                          form.header_type === 'image'
+                            ? 'image/*'
+                            : form.header_type === 'video'
+                            ? 'video/*'
+                            : '.pdf,.doc,.docx'
+                        }
+                        disabled={uploading}
+                        onChange={handleFileUpload}
+                        className="bg-slate-800 border-slate-700 text-white text-xs cursor-pointer h-9 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-700 file:text-white hover:file:bg-slate-600"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-normal">
+                    {'Meta requires a sample attachment for review when creating media-header templates. Drag, drop or select a sample.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label className="text-slate-300">Body Text</Label>
               <Textarea
@@ -430,7 +530,7 @@ export function TemplateManager() {
                 value={form.body_text}
                 onChange={(e) => setForm({ ...form, body_text: e.target.value })}
                 rows={4}
-                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 resize-none"
+                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 resize-none min-h-[100px]"
               />
             </div>
 
@@ -445,7 +545,8 @@ export function TemplateManager() {
             </div>
           </div>
 
-          <DialogFooter className="bg-slate-900 border-slate-700">
+          {/* Sticky Dialog Footer */}
+          <DialogFooter className="shrink-0 pt-3 border-t border-slate-800/60 bg-slate-900">
             <Button
               variant="outline"
               onClick={() => setDialogOpen(false)}
@@ -455,12 +556,12 @@ export function TemplateManager() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || uploading}
               className="bg-violet-600 hover:bg-violet-700 text-white"
             >
               {saving ? (
                 <>
-                  <Loader2 className="size-4 animate-spin" />
+                  <Loader2 className="size-4 animate-spin mr-1.5" />
                   Creating...
                 </>
               ) : (
