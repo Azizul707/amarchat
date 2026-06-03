@@ -2,19 +2,17 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Navbar } from "@/components/landing/navbar";
 import { Footer } from "@/components/landing/footer";
 import { 
   Check, 
   ArrowRight, 
   HelpCircle, 
-  Zap, 
   ShieldCheck, 
   Users, 
   Radio, 
   GitBranch, 
-  MessageSquare, 
-  Brain, 
   ChevronDown,
   Volume2,
   Lock
@@ -115,18 +113,20 @@ export default function HomePage() {
           {/* Hero Dashboard Image Mockup */}
           <div className="pt-16 relative z-10 max-w-5xl mx-auto px-4">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/10 p-2 md:p-3 shadow-2xl shadow-indigo-500/10">
-              <div className="rounded-xl border border-zinc-900 overflow-hidden bg-zinc-950 aspect-[16/10] relative">
-                <img 
+              <div className="rounded-xl border border-zinc-900 overflow-hidden bg-zinc-950 aspect-16/10 relative">
+                <Image 
                   src="/hero-dashboard.png" 
                   alt="amarchat Interactive Dashboard Mockup" 
-                  className="w-full h-full object-cover"
+                  fill
+                  priority
+                  className="object-cover"
                 />
               </div>
             </div>
           </div>
         </section>
 
-        {/* 2. THREE CORE SOLUTIONS SHOWCASE (WITH SCROLL CODES & IMAGES) */}
+        {/* 2. THREE CORE SOLUTIONS SHOWCASE */}
         <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-20 border-t border-zinc-900 space-y-28">
           <div className="text-center space-y-3 max-w-3xl mx-auto">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-xs font-semibold text-indigo-400">
@@ -134,7 +134,7 @@ export default function HomePage() {
             </div>
             <h2 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight">
               {'See the tools that drive '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">{'real results'}</span>
+              <span className="text-transparent bg-clip-text bg-linear-to-r from-indigo-400 to-purple-400">{'real results'}</span>
             </h2>
             <p className="text-sm md:text-base text-zinc-400">
               {'Discover how our premium Bring Your Own App (BYOA) system enables professional WhatsApp operations without the risk.'}
@@ -170,11 +170,12 @@ export default function HomePage() {
             </div>
             <div className="lg:col-span-7">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-2 shadow-xl">
-                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-[3/2]">
-                  <img 
+                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-3/2 relative">
+                  <Image 
                     src="/feature-inbox.png" 
                     alt="Unified Shared Team Inbox" 
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
                   />
                 </div>
               </div>
@@ -212,18 +213,19 @@ export default function HomePage() {
             </div>
             <div className="lg:col-span-5 lg:order-1">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-2 shadow-xl">
-                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-[3/2]">
-                  <img 
+                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-3/2 relative">
+                  <Image 
                     src="/feature-bot.png" 
                     alt="Custom AI Chatbot Knowledge Base Training" 
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
                   />
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Feature Block 3: Broadcast campaigns */}
+          {/* Feature Block 3: Broadcast Campaigns */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
             <div className="lg:col-span-5 space-y-6">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-indigo-500/10 bg-indigo-500/5 text-xs font-semibold text-indigo-400">
@@ -252,11 +254,12 @@ export default function HomePage() {
             </div>
             <div className="lg:col-span-7">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-2 shadow-xl">
-                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-[3/2]">
-                  <img 
+                <div className="rounded-lg border border-zinc-900 overflow-hidden bg-zinc-950 aspect-3/2 relative">
+                  <Image 
                     src="/feature-broadcast.png" 
                     alt="Official WhatsApp Campaign Broadcaster" 
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
                   />
                 </div>
               </div>
@@ -310,7 +313,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* 5. OFFICIAL API SECURITY EXPLANATION (COMPLIANT DESIGN WITH SCREENSHOT-INSPIRED COPY) */}
+        {/* 5. OFFICIAL API SECURITY EXPLANATION */}
         <section className="max-w-5xl mx-auto px-4 md:px-8 py-20 border-t border-zinc-900">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-6">
@@ -393,7 +396,7 @@ export default function HomePage() {
 
         {/* 7. BOTTOM CTA BANNER */}
         <section className="max-w-5xl mx-auto px-4 md:px-8 py-16">
-          <div className="relative rounded-3xl border border-indigo-500/20 bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-zinc-950/80 p-8 md:p-12 text-center overflow-hidden">
+          <div className="relative rounded-3xl border border-indigo-500/20 bg-linear-to-r from-indigo-950/40 via-purple-950/20 to-zinc-950/80 p-8 md:p-12 text-center overflow-hidden">
             <div className="absolute inset-0 bg-indigo-500/5 blur-[80px] -z-10 pointer-events-none" />
             <h2 className="text-2xl md:text-4xl font-extrabold text-white tracking-tight leading-snug">
               {'Scale Your Customer Support'} <br />
