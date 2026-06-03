@@ -17,7 +17,8 @@ import {
   ShieldCheck, 
   ShieldAlert, 
   Zap, 
-  Brain 
+  Brain,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspace } from '@/providers/workspace-provider';
@@ -28,12 +29,13 @@ import { TagManager } from '@/components/settings/tag-manager';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
+import { GoogleSheetsConfig } from '@/components/settings/google-sheets-config';
 import { cn } from '@/lib/utils';
 
 // নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
 import KnowledgeBaseSettings from './knowledge-base/page';
 
-const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'templates', 'tags'] as const;
+const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets', 'templates', 'tags'] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 function isTabValue(v: string | null): v is TabValue {
@@ -256,7 +258,7 @@ function TeamForm() {
         </div>
         
         <p className="text-xs text-amber-500 leading-normal font-sans">
-          📌 নোট: এজেন্টকে আমাদের প্ল্যাটফর্মে অবশ্যই আগে একটি অ্যাকাউন্ট তৈরি (Sign Up) করতে হবে। অন্যথায় ইমেইলটি ডাটাবেসে খুঁজে পাওয়া যাবে না।
+          📌 নোট: এজেন্টকে আমাদের প্ল্যাটফর্ম অবশ্যই আগে একটি অ্যাকাউন্ট তৈরি (Sign Up) করতে হবে। অন্যথায় ইমেইলটি ডাটাবেসে খুঁজে পাওয়া যাবে না।
         </p>
       </form>
 
@@ -513,7 +515,6 @@ export default function SettingsPage() {
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  // রিয়্যাক্ট ১৯ এবং নেক্সট ১৬ এর রাউটার ক্যাশ এড়াতে লোকাল রিয়্যাক্টিভ স্টেট
   const queryTab = searchParams.get('tab');
   const initialTab: TabValue = isTabValue(queryTab) ? queryTab : 'profile';
   const [tab, setTab] = useState<TabValue>(initialTab);
@@ -523,7 +524,6 @@ export default function SettingsPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // useEffect এর লুপ এড়াতে getFreshStatus কে useCallback দিয়ে র্যাপ করা হলো 
   const getFreshStatus = useCallback(async () => {
     try {
       setCheckingStatus(true);
@@ -562,9 +562,8 @@ export default function SettingsPage() {
   useEffect(() => {
     setMounted(true);
     getFreshStatus();
-  }, [getFreshStatus]); // getFreshStatus কে ডিপেন্ডেন্সি এরেতে যুক্ত করা হলো
+  }, [getFreshStatus]);
 
-  // ইউআরএল প্যারামিটার পরিবর্তন হলে লোকাল স্টেটকেও আপডেট করাবে (সিঙ্ক্রোনাইজেশন)
   useEffect(() => {
     const currentTab = searchParams.get('tab');
     if (isTabValue(currentTab)) {
@@ -575,13 +574,10 @@ export default function SettingsPage() {
   const activeApproved = localProfile ? localProfile.is_approved : (cachedProfile as unknown as { is_approved?: boolean })?.is_approved;
   const activeExpiry = localProfile ? localProfile.subscription_expires_at : (cachedProfile as unknown as { subscription_expires_at?: string | null })?.subscription_expires_at;
 
-  // সিকিউরিটি লুপহোল প্রোটেকশন: আপনার এপ্রুভালের ওপর ভিত্তি করে ওনার লজিক সেট করা হলো
-  // কেউ একাউন্ট খোলার পর আপনি যাকে এপ্রুভ করবেন (is_approved === true), সে-ই একমাত্র ওনার/এডমিন
   const isOwner = !!activeApproved;
 
-  // সিকিউরিটি গার্ড: এজেন্টদের সরাসরি লিংকের অ্যাক্সেস ব্লক করে রিডাইরেক্ট করবে
   useEffect(() => {
-    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp'].includes(tab)) {
+    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets'].includes(tab)) {
       setTab('profile');
       const params = new URLSearchParams(searchParams.toString());
       params.set('tab', 'profile');
@@ -597,7 +593,7 @@ export default function SettingsPage() {
   const isLocked = !isSubscriptionActive;
 
   const onChange = (next: TabValue) => {
-    setTab(next); // লোকাল স্টেট সাথে সাথে আপডেট করে রি-রেন্ডার ট্রিগার করা হলো
+    setTab(next);
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next);
     router.replace(`/settings?${params.toString()}`, { scroll: false });
@@ -618,7 +614,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* Settings Secondary Sidebar (চ্যাটসিঙ্কস স্টাইল ভার্টিক্যাল সাইডবার) */}
+        {/* Settings Secondary Sidebar */}
         <div className="w-full md:w-56 shrink-0 bg-slate-900/30 border border-slate-800 rounded-xl p-2 flex flex-col gap-1">
           
           {/* General Settings Category */}
@@ -631,7 +627,7 @@ export default function SettingsPage() {
             className={cn(
               "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
               tab === 'profile'
-                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                 : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
             )}
           >
@@ -646,7 +642,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'workspace'
-                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -659,7 +655,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'team'
-                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -678,7 +674,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'ai'
-                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -691,7 +687,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'kb'
-                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -704,12 +700,26 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'whatsapp'
-                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-violet-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
                 <Settings className="size-4" />
                 <span>WhatsApp Config</span>
+              </button>
+
+              {/* NEW GOOGLE SHEETS TAB */}
+              <button
+                onClick={() => onChange('sheets')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'sheets'
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <FileSpreadsheet className="size-4" />
+                <span>Google Sheets</span>
               </button>
             </>
           )}
@@ -725,7 +735,7 @@ export default function SettingsPage() {
             className={cn(
               "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
               tab === 'templates'
-                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                 : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
             )}
           >
@@ -738,7 +748,7 @@ export default function SettingsPage() {
             className={cn(
               "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
               tab === 'tags'
-                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                 : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
             )}
           >
@@ -801,6 +811,24 @@ export default function SettingsPage() {
                 />
               ) : (
                 <WhatsAppConfig />
+              )}
+            </>
+          )}
+
+          {tab === 'sheets' && isOwner && (
+            <>
+              {!mounted || checkingStatus ? (
+                <div className="flex h-48 items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : isLocked ? (
+                <LockedTabCard 
+                  title="Google Sheets Sync" 
+                  onRefresh={handleRefreshStatus}
+                  checking={checkingStatus}
+                />
+              ) : (
+                <GoogleSheetsConfig />
               )}
             </>
           )}

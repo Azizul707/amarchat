@@ -1,12 +1,12 @@
 import { NextResponse, after } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import crypto from 'crypto' // ডাইনামিক সিগনেচার ভেরিফিকেশনের জন্য ক্রিপ্টো মডিউল
+import crypto from 'crypto'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 
-// WhatsappConfigRow টাইপ-সেফ ইন্টারফেস (no-explicit-any এরর দূর করতে)
+// WhatsappConfigRow টাইপ-সেফ ইন্টারফেস
 interface WhatsappConfigRow {
   id: string
   workspace_id: string
@@ -55,6 +55,28 @@ interface MessageContentImage {
 }
 
 type MessageContent = MessageContentText | MessageContentImage
+
+// গুগল শিট ডাটা রিড করার জন্য ইন্টারফেসসমূহ
+interface GvizCol {
+  label: string
+}
+interface GvizCell {
+  v: string | number | null
+  f?: string
+}
+interface GvizRow {
+  c: (GvizCell | null)[]
+}
+
+// OpenAI Function Tool types
+interface ToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
 
 let _adminClient: SupabaseClient | null = null
 function supabaseAdmin(): SupabaseClient {
@@ -108,7 +130,6 @@ interface WhatsAppWebhookEntry {
   }>
 }
 
-// ডাইনামিক সিগনেচার কম্পারিসন (মেটা ওয়েব হুক সিকিউরিটি প্রটেকশন)
 function verifyDynamicSignature(rawBody: string, signature: string | null, appSecret: string): boolean {
   if (!signature) return false
   const parts = signature.split('=')
@@ -125,7 +146,6 @@ function verifyDynamicSignature(rawBody: string, signature: string | null, appSe
   }
 }
 
-// গ্লোবাল সেফ ডাউনলোডার (User-Agent spoofing ও ৩xx রিডাইরেক্ট রি-ফরোয়ার্ডিং বাগ মুক্ত)
 async function safeDownload(url: string, token: string): Promise<ArrayBuffer | null> {
   try {
     console.log('[safeDownload] Initiating download request with curl/7.64.1 User-Agent');
@@ -231,7 +251,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // ১. ডাইনামিক সিগনেচার ভেরিফিকেশনের জন্য phone_number_id রিড করি
   let phoneNumberId = ''
   try {
     phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id || ''
@@ -249,7 +268,6 @@ export async function POST(request: Request) {
     config = data as WhatsappConfigRow | null
   }
 
-  // ২. কাস্টমারের নিজস্ব app_secret লোড করা, না থাকলে গ্লোবাল .env.local সিক্রেট ব্যবহার করা (100% backward compatible)
   let decryptedAppSecret = ''
   if (config && config.app_secret) {
     try {
@@ -263,13 +281,11 @@ export async function POST(request: Request) {
     decryptedAppSecret = process.env.META_APP_SECRET || ''
   }
 
-  // ৩. ডাইনামিক সিগনেচার ভেরিফিকেশন রান করা হলো
   if (!verifyDynamicSignature(rawBody, signature, decryptedAppSecret)) {
     console.warn('[webhook] Rejected request: Dynamic signature validation failed.')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
-  // মেটা-কে instantly HTTP 200 দিয়ে দেওয়া হচ্ছে যাতে ডুপ্লিকেট retry জেনারেট না হয়।
   after(async () => {
     try {
       console.log('[webhook-after] Background thread starting.');
@@ -527,6 +543,106 @@ async function sendWhatsAppMessage(
   }
 }
 
+// কাস্টমারকে মিডিয়া (ইমেজ ও ক্যাপশন) রেসপন্স পাঠানোর জন্য অফিসিয়াল এপিআই মেথড
+async function sendWhatsAppImageMessage(
+  phone: string,
+  imageUrl: string,
+  caption: string,
+  phoneNumberId: string,
+  accessToken: string
+) {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'image',
+          image: { 
+            link: imageUrl,
+            caption: caption 
+          },
+        }),
+      }
+    )
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      console.error('[webhook-send] Meta API image send failed:', errBody)
+    } else {
+      console.log('[webhook-send] WhatsApp Image response sent successfully to customer.')
+    }
+  } catch (err) {
+    console.error('[webhook-send] Exception during WhatsApp Image send:', err)
+  }
+}
+
+// গুগল শিটের ইনভেন্টরি বা পণ্য তালিকা রিড করার ড্রাইভার ফাংশন
+async function fetchGoogleSheetInventory(sheetId: string): Promise<string> {
+  try {
+    console.log('[google-sheets] Fetching inventory rows from Sheet ID:', sheetId)
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=Inventory`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Google Sheet responded with status: ${res.status}`)
+    
+    const text = await res.text()
+    const jsonStart = text.indexOf('{')
+    const jsonEnd = text.lastIndexOf('}') + 1
+    if (jsonStart < 0 || jsonEnd < 0) return 'No inventory data found.'
+    
+    const jsonStr = text.substring(jsonStart, jsonEnd)
+    const rawData = JSON.parse(jsonStr)
+    
+    const cols = rawData.table.cols as GvizCol[]
+    const rows = rawData.table.rows as GvizRow[]
+    
+    if (!rows || rows.length === 0) return 'Inventory is currently empty.'
+    
+    const headers = cols.map((c) => c?.label || 'Unknown')
+    const parsedProducts = rows.map((row) => {
+      const productObj: Record<string, string> = {}
+      row.c.forEach((cell, idx) => {
+        const headerName = headers[idx] || `col_${idx}`
+        productObj[headerName] = cell && cell.v !== null ? String(cell.v) : ''
+      })
+      return productObj
+    })
+
+    return JSON.stringify(parsedProducts, null, 2)
+  } catch (err) {
+    console.error('[google-sheets] Inventory fetch error:', err)
+    return 'Failed to load active product catalog. Tell the customer to try again later.'
+  }
+}
+
+// গুগল অ্যাপস স্ক্রিপ্ট ব্যবহার করে গুগল শিটের Orders ট্যাবে রিয়েল-টাইম নতুন সারি যোগ করার ড্রাইভার
+async function appendOrderToGoogleSheet(appsScriptUrl: string, orderDetails: Record<string, unknown>): Promise<boolean> {
+  try {
+    console.log('[google-sheets] Appending new order row to Apps Script Web App...')
+    const res = await fetch(appsScriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(orderDetails),
+    })
+    
+    if (res.ok) {
+      console.log('[google-sheets] Order successfully appended to marchant spreadsheet.')
+      return true
+    }
+    console.error('[google-sheets] Append endpoint error:', res.status)
+  } catch (err) {
+    console.error('[google-sheets] Exception while appending order:', err)
+  }
+  return false
+}
+
 async function processMessage(
   message: WhatsAppMessage,
   contact: { profile: { name: string }; wa_id: string },
@@ -620,8 +736,8 @@ async function processMessage(
       if (verifiedUrlData && verifiedUrlData.url) {
         let downloadResult: ArrayBuffer | null = null
         let attempts = 0
-        const maxAttempts = 5 // মেটা প্রোপাগেশন ডিলে আটকাতে ৫ বার চেষ্টা করা হচ্ছে
-        const delayMs = 2500 // প্রতিবার আড়াই সেকেন্ড ডিলে (মোট ১২.৫ সেকেন্ড ব্যাকগ্রাউন্ড বাফার উইন্ডো)
+        const maxAttempts = 5
+        const delayMs = 2500
 
         while (attempts < maxAttempts) {
           if (attempts > 0) {
@@ -644,7 +760,7 @@ async function processMessage(
           const sanitizedBaseUrl = aiBaseUrl.replace(/\/$/, '')
           const transcriptionUrl = `${sanitizedBaseUrl}/audio/transcriptions`
           
-          let whisperModel = 'openai/whisper-large-v3' // ওপেনরাউটার এর সাথে বেস্ট সামঞ্জস্যের জন্য স্ট্যান্ডার্ড ফলব্যাক
+          let whisperModel = 'openai/whisper-large-v3'
           if (aiBaseUrl.includes('groq')) {
             whisperModel = 'whisper-large-v3'
           } else if (aiBaseUrl.includes('api.openai.com')) {
@@ -655,13 +771,11 @@ async function processMessage(
           const isOpenRouter = aiBaseUrl.includes('openrouter');
 
           if (isOpenRouter) {
-            // ১. মার্চেন্ট OpenRouter ব্যবহার করলে: ওজিজি অডিও বাফারকে Base64 অবজেক্টে কনভার্ট করে JSON পে-লোডে পাঠানো হচ্ছে।
             const base64Audio = Buffer.from(downloadResult).toString('base64');
             const openRouterModel = config.ai_model && config.ai_model.includes('whisper')
               ? config.ai_model
               : 'openai/whisper-large-v3';
 
-            // ডাইনামিকলি অডিও ফরম্যাট চিহ্নিতকরণ (মেটা ভয়েস নোটের জন্য ওজিজি ও রিজিড ডিকোডিং সেভগার্ড)
             let audioFormat = 'ogg';
             if (verifiedUrlData.mimeType) {
               if (verifiedUrlData.mimeType.includes('ogg')) {
@@ -692,7 +806,6 @@ async function processMessage(
               })
             });
           } else {
-            // ২. স্ট্যান্ডার্ড OpenAI বা Groq এপিআই-এর জন্য প্রথাগত মাল্টিপার্ট বাফার কনস্ট্রাক্ট করা হচ্ছে।
             const boundary = `----WebKitFormBoundary${Math.random().toString(36).substring(2)}`
             const chunks: Buffer[] = []
 
@@ -754,7 +867,6 @@ async function processMessage(
       })) as { url: string; mimeType: string } | null
 
       if (verifiedUrlData && verifiedUrlData.url) {
-        // ইমেজ ডাউনলোডেও সেফ ডাউনলোডার এবং ইউজার এজেন্ট প্রোটেকশন ব্যবহার করা হলো
         const tempResult = await safeDownload(verifiedUrlData.url, accessToken)
         if (tempResult) {
           const buffer = Buffer.from(tempResult)
@@ -815,7 +927,6 @@ async function processMessage(
       if (contentText && !isFallbackText && !isTranscriptionFailed) {
         console.log('[webhook-ai] Fetching Knowledge Base directly by workspace_id to avoid RAG dilution:', conversation.workspace_id);
         
-        // **১-টু-১ এন্টারপ্রাইজ ফিক্স (Direct exact select lookup)**: 
         const { data: kbRow, error: kbError } = await supabaseAdmin()
           .from('knowledge_base')
           .select('content')
@@ -828,7 +939,6 @@ async function processMessage(
         } else {
           console.warn('[webhook-ai] Direct lookup failed or empty. Falling back to semantic vector search...', kbError);
           
-          // সেফ ফলব্যাক: সরাসরি ডাটা না পেলে ভেক্টর আরপিসি ম্যাচিং চেষ্টা করা হচ্ছে
           const embedRes = await fetch(embeddingsUrl, {
             method: 'POST',
             headers: {
@@ -860,6 +970,13 @@ async function processMessage(
         }
       }
 
+      // **৩. সুরক্ষিত গুগল শিট ইন্টিগ্রেশন চেক** (Tenant Isolation: Multi-Device Sync Safe)
+      const { data: sheetsIntegration } = await supabaseAdmin()
+        .from('workspace_integrations')
+        .select('*')
+        .eq('workspace_id', conversation.workspace_id)
+        .maybeSingle()
+
       const userMessageContent: MessageContent[] = []
       
       if (isFallbackText || isTranscriptionFailed) {
@@ -870,7 +987,7 @@ async function processMessage(
       } else if (message.type === 'image') {
         userMessageContent.push({ 
           type: 'text', 
-          text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটি বিশ্লেষণ করুন। কঠোর নিয়ম: যদি ছবিটি এই ব্যবসার নলেজবেজ বা ডোমেইনের সাথে সরাসরি সম্পর্কিত হয় (যেমন: আপনার নিজস্ব পণ্য, পেমেন্ট স্ক্রিনশট, অর্ডার রিসিট, বা ত্রুটিপূর্ণ পণ্য), তবে নলেজবেজ অনুসরণ করে বাংলায় গ্রাহককে সহায়তা করুন। আর যদি ছবিটি ব্যবসার বাইরের সম্পূর্ণ অপ্রাসঙ্গিক কোনো বিষয় হয় (যেমন: মিম, সেলফি, বিনোদনমূলক বা অন্য কোনো অবান্তর ছবি), তবে কোনোভাবেই ওই অবান্তর ছবি নিয়ে আলোচনায় মাতবেন না। অত্যন্ত ভদ্রভাবে বাংলায় দুঃখ প্রকাশ করে বলুন যে আপনি কেবল এই নির্দিষ্ট ব্যবসার পণ্য ও সেবা সংক্রান্ত বিষয়ে সাহায্য করতে পারেন এবং তাকে ব্যবসার বিষয় নিয়ে কথা বলতে অনুরোধ করুন।' 
+          text: 'কাস্টমার একটি ছবি পাঠিয়েছেন। ছবিটি বিশ্লেষণ করুন। কঠোর নিয়ম: যদি ছবিটি এই ব্যবসার নলেজবেজ বা ডোমেইনের সাথে সরাসরি সম্পর্কিত হয় (যেমন: আপনার নিজস্ব পণ্য, পেমেন্ট স্ক্রিনশট, অর্ডার রিসিট, বা ত্রুটিপূর্ণ পণ্য), তবে নলেজবেজ অনুসরণ করে বাংলায় গ্রাহককে সহায়তা করুন। আর যদি ছবিটি ব্যবসার বাইরের সম্পূর্ণ অপ্রাসঙ্গিক কোনো বিষয় হয় (যেমন: মিম, সেফি, বিনোদনমূলক বা অন্য কোনো অবান্তর ছবি), তবে কোনোভাবেই ওই অবান্তর ছবি নিয়ে আলোচনায় মাতবেন না। অত্যন্ত ভদ্রভাবে বাংলায় দুঃখ প্রকাশ করে বলুন যে আপনি কেবল এই নির্দিষ্ট ব্যবসার পণ্য ও সেবা সংক্রান্ত বিষয়ে সাহায্য করতে পারেন এবং তাকে ব্যবসার বিষয় নিয়ে কথা বলতে অনুরোধ করুন।' 
         })
       } else if (contentText) {
         userMessageContent.push({ type: 'text', text: contentText })
@@ -896,56 +1013,174 @@ async function processMessage(
         customHeaders['X-Title'] = 'amarchat CRM'
       }
 
-      // **মার্চেন্ট ডাইনামিক সিস্টেম প্রম্পট মার্জিং**:
       const baseSystemPrompt = config.ai_prompt || 'You are an expert sales and support assistant representing this business.'
 
+      // ডাইনামিক এআই এজেন্ট টুল ডেফিনিশন (গুগল শিট কানেক্ট করা থাকলে স্বয়ংক্রিয়ভাবে সক্রিয় হবে)
+      const aiTools: unknown[] = []
+      if (sheetsIntegration && sheetsIntegration.google_sheet_id) {
+        aiTools.push({
+          type: 'function',
+          function: {
+            name: 'search_products',
+            description: 'Searches the live Google Sheet inventory catalog to fetch matching product details, sizing, variations, pricing, and product Image URLs.',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'Keyword to search in product names or SKU' }
+              },
+              required: ['query']
+            }
+          }
+        })
+        
+        if (sheetsIntegration.apps_script_url) {
+          aiTools.push({
+            type: 'function',
+            function: {
+              name: 'create_order',
+              description: 'Appends a new verified customer order to the marchant\'s live Google Sheet database. CRITICAL: You must collect Customer Name, Phone, Address, Product SKU/Name, and optionally Color/Size/Quantity details before calling this. If some fields are missing, ask the customer for them first.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  customer_name: { type: 'string' },
+                  mobile: { type: 'string' },
+                  address: { type: 'string' },
+                  product_sku_or_name: { type: 'string' },
+                  quantity: { type: 'number', default: 1 },
+                  size: { type: 'string', description: 'Product size variant (e.g. M, L, XL)' },
+                  color: { type: 'string', description: 'Product color variant' }
+                },
+                required: ['customer_name', 'mobile', 'address', 'product_sku_or_name']
+              }
+            }
+          })
+        }
+      }
+
       console.log(`[webhook-ai] Call to completions model: ${aiModel}`);
-      const gptRes = await fetch(chatUrl, {
-        method: 'POST',
-        headers: customHeaders,
-        body: JSON.stringify({
-          model: aiModel,
-          messages: [
-            {
-              role: 'system',
-              content: `${baseSystemPrompt}
+      const aiPayload: Record<string, unknown> = {
+        model: aiModel,
+        messages: [
+          {
+            role: 'system',
+            content: `${baseSystemPrompt}
 
 CRITICAL RULE FOR MULTI-TENANT SAAS ISOLATION:
-Your entire identity, scope of work, and product catalog are STRICTLY limited to the provided "BUSINESS KNOWLEDGE BASE" below. You must never assume, invent, or hallucinate any services, products, or offers that are not explicitly mentioned in the knowledge base.
+Your entire identity, scope of work, and product catalog are STRICTLY limited to the provided "BUSINESS KNOWLEDGE BASE" below and any live products returned from your "search_products" tool. You must never assume, invent, or hallucinate any services, products, or offers that are not explicitly mentioned.
 
 1. SCOPE OF ASSISTANCE:
-- You must carefully analyze the customer's query or sent image against the "BUSINESS KNOWLEDGE BASE".
-- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed in the knowledge base (e.g., sending a food picture like sweets/rosogolla to a seed/agricultural business, or asking about electronics at a clothing shop), you MUST politely and gently decline. Clarify in friendly Bangla that this business only deals in the scope listed in the knowledge base and you cannot assist with other items.
-- Never praise, negotiate, or confirm orders for products outside the knowledge base.
+- You must carefully analyze the customer's query or sent image.
+- If the customer asks about or sends an image of something that is completely unrelated to the products/services listed, politely and gently decline. Clarify in friendly Bangla that this business only deals in the scope listed and you cannot assist with other items.
 
-2. IN-SCOPE SALES & SUPPORT:
-- If the request aligns with the knowledge base, be highly persuasive and friendly. Speak in a warm Bangla/Banglish blend, using respectful terms.
-- Provide clear answers, assist in closing the sale, and offer any discount/combo structures if documented in the knowledge base.
+2. MEDIA RESPONSE WORKFLOW:
+- If you find an image URL during the product search, you MUST output the image URL in this strict bracket format inside your text reply: [MEDIA_URL:https://example.com/product-image.png].
+- Do not hide or alter this brackets tag; our API wrapper reads this token to send native WhatsApp photo attachments!
 
-3. FALLBACK WHEN KNOWLEDGE BASE IS EMPTY OR NOT ACCESSIBLE:
-- If the "BUSINESS KNOWLEDGE BASE" section below is empty, completely unconfigured, or has no information about the business yet, politely apologize and state that currently you do not have any specific product or business information. Ask the customer how you can assist them regarding their questions (e.g. "আমি আপনাকে কিভাবে সাহায্য করতে পারি?"). Crucially: Never ask the customer how they can help the business (e.g. do not say "আপনি কিভাবে আমাদের সাহায্য করতে চান"). Always offer assistance from the business to the customer.
+3. GOOGLE SHEET ORDER FORMULATION:
+- If a client wants to order, check what details you have. If details like size, color, quantity, address, or phone are missing, politely ask the customer: "দয়া করে আপনার জামার সাইজ এবং কালারটি বলুন।" before confirming.
+- Once all fields are confirmed, call the "create_order" tool to log the order in the merchant's live Spreadsheet database.
 
 BUSINESS KNOWLEDGE BASE:
 ---------------------
 ${matchedContext || ''}
 ---------------------`
-            },
-            {
-              role: 'user',
-              content: userMessageContent
-            }
-          ],
-          max_tokens: 400,
-          temperature: 0.7,
-        }),
+          },
+          {
+            role: 'user',
+            content: userMessageContent
+          }
+        ],
+        max_tokens: 450,
+        temperature: 0.7,
+      }
+
+      if (aiTools.length > 0) {
+        aiPayload.tools = aiTools
+      }
+
+      let gptRes = await fetch(chatUrl, {
+        method: 'POST',
+        headers: customHeaders,
+        body: JSON.stringify(aiPayload),
       })
 
       if (gptRes.ok) {
-        const gptData = await gptRes.json()
-        const aiReplyText = gptData.choices[0].message.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
+        let gptData = await gptRes.json()
+        let choice = gptData.choices[0]
+        let aiMessage = choice.message
+
+        // **৪. টুল কলিং (Function Calling) লুপ হ্যান্ডলার**
+        if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+          console.log('[webhook-ai] Tool call requested by GPT model.');
+          const toolResults: unknown[] = []
+
+          for (const toolCallRaw of aiMessage.tool_calls) {
+            const toolCall = toolCallRaw as ToolCall
+            const functionName = toolCall.function.name
+            const functionArgs = JSON.parse(toolCall.function.arguments)
+
+            let resultText = ''
+
+            if (functionName === 'search_products' && sheetsIntegration?.google_sheet_id) {
+              resultText = await fetchGoogleSheetInventory(sheetsIntegration.google_sheet_id)
+            } else if (functionName === 'create_order' && sheetsIntegration?.apps_script_url) {
+              const success = await appendOrderToGoogleSheet(sheetsIntegration.apps_script_url, functionArgs)
+              resultText = success ? 'Success: Order appended' : 'Error: Append failed'
+            }
+
+            toolResults.push({
+              tool_call_id: toolCall.id,
+              role: 'tool',
+              name: functionName,
+              content: resultText,
+            })
+          }
+
+          // টুল রেজাল্টসহ এআই-এর কাছে সেকেন্ড completions কল পাঠানো হচ্ছে
+          console.log('[webhook-ai] Submitting tool execution feedback to completions API...');
+          const secondRes = await fetch(chatUrl, {
+            method: 'POST',
+            headers: customHeaders,
+            body: JSON.stringify({
+              model: aiModel,
+              messages: [
+                ...aiPayload.messages as Array<{ role: string; content: unknown }>,
+                aiMessage,
+                ...toolResults,
+              ],
+              max_tokens: 400,
+              temperature: 0.7,
+            }),
+          })
+
+          if (secondRes.ok) {
+            const secondData = await secondRes.ok ? await secondRes.json() : null
+            if (secondData) {
+              aiMessage = secondData.choices[0].message
+            }
+          } else {
+            const errBody = await secondRes.json().catch(() => ({}))
+            console.error('[webhook-ai] Tool submit completions failed:', errBody)
+          }
+        }
+
+        const aiReplyText = aiMessage.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
         console.log('[webhook-ai] Success response:', aiReplyText);
 
-        await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
+        // **৫. হোয়াটসঅ্যাপ মিডিয়া এপিআই ট্রানজিশন** (Extracting custom bracket tags)
+        const mediaRegex = /\[MEDIA_URL:(https?:\/\/[^\]]+)\]/i
+        const mediaMatch = aiReplyText.match(mediaRegex)
+
+        if (mediaMatch && mediaMatch[1]) {
+          // ইমেজের স্যাম্পল ইউআরএল পাওয়া গেলে কাস্টমারকে ডাইরেক্ট ইমেজ মেসেজ উইথ ক্যাপশন পাঠানো হবে
+          const imageUrl = mediaMatch[1].trim()
+          const cleanCaption = aiReplyText.replace(mediaRegex, '').trim()
+          
+          await sendWhatsAppImageMessage(senderPhone, imageUrl, cleanCaption, phoneNumberId, accessToken)
+        } else {
+          // সাধারণ টেক্সট মেসেজ পাঠানো
+          await sendWhatsAppMessage(senderPhone, aiReplyText, phoneNumberId, accessToken)
+        }
 
         await supabaseAdmin().from('messages').insert({
           conversation_id: conversation.id,
