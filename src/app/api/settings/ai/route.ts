@@ -75,27 +75,64 @@ export async function POST(request: Request) {
     }
 
     let encryptedApiKey = ''
-
     if (apiKey) {
       encryptedApiKey = encrypt(apiKey)
     }
 
-    const { error } = await supabase
+    // ১. প্রথমে চেক করছি এই ওয়ার্কস্পেসের জন্য কনফিগ অলরেডি ডাটাবেসে আছে কিনা
+    const { data: existingConfig, error: fetchError } = await supabase
       .from('whatsapp_config')
-      .upsert({
-        workspace_id: profile.workspace_id,
-        user_id: user.id,
-        openai_api_key: encryptedApiKey,
+      .select('id')
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
+
+    if (fetchError) {
+      console.error('Failed to query existing AI config:', fetchError.message)
+      return NextResponse.json({ error: 'Database verification failed' }, { status: 500 })
+    }
+
+    let saveError = null
+
+    if (existingConfig) {
+      // ২. ডাটা থাকলে: শুধুমাত্র UPDATE কোয়েরি রান হবে
+      const updateData: Record<string, unknown> = {
         ai_prompt: prompt,
         ai_base_url: baseUrl,
         ai_model: model,
-        status: 'active'
-      }, {
-        onConflict: 'workspace_id'
-      })
+        status: 'active',
+        updated_at: new Date().toISOString()
+      }
 
-    if (error) {
-      console.error('Failed to save AI config:', error.message)
+      // এপিআই কি ফিল্ড ফর্মে দিলে তবেই আপডেট হবে, খালি রাখলে পূর্বের কি অপরিবর্তিত থাকবে
+      if (encryptedApiKey) {
+        updateData.openai_api_key = encryptedApiKey
+      }
+
+      const { error } = await supabase
+        .from('whatsapp_config')
+        .update(updateData)
+        .eq('workspace_id', profile.workspace_id)
+      saveError = error
+    } else {
+      // ৩. ডাটা না থাকলে: নতুন রো হিসেবে INSERT কোয়েরি রান হবে
+      const { error } = await supabase
+        .from('whatsapp_config')
+        .insert({
+          workspace_id: profile.workspace_id,
+          user_id: user.id,
+          openai_api_key: encryptedApiKey || null,
+          ai_prompt: prompt,
+          ai_base_url: baseUrl,
+          ai_model: model,
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+      saveError = error
+    }
+
+    if (saveError) {
+      console.error('Failed to save AI config database action:', saveError.message)
       return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 })
     }
 
