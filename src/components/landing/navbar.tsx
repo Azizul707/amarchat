@@ -38,7 +38,7 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* রিব্র্যান্ডেড স্প্লিট লোগো */}
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 shadow-sm shadow-indigo-600/25 border border-indigo-500/30">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-600 shadow-sm shadow-purple-600/25 border border-purple-500/30">
             <MessageSquare className="h-4 w-4 text-white" />
           </div>
           <span className="font-extrabold text-xl tracking-tight leading-none text-white">
@@ -56,7 +56,7 @@ export function Navbar() {
                 href={link.href}
                 className={cn(
                   "text-xs font-semibold tracking-wide transition-colors hover:text-white",
-                  isActive ? "text-indigo-400" : "text-zinc-400"
+                  isActive ? "text-purple-400" : "text-zinc-400"
                 )}
               >
                 {link.label}
@@ -75,7 +75,7 @@ export function Navbar() {
           </Link>
           <Link
             href="/signup"
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-600/25"
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-purple-600/25"
           >
             Get Started Free
           </Link>
@@ -116,7 +116,7 @@ export function Navbar() {
             <Link
               href="/signup"
               onClick={() => setIsOpen(false)}
-              className="w-full py-2.5 rounded-lg text-center text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors shadow-md"
+              className="w-full py-2.5 rounded-lg text-center text-sm font-bold bg-purple-600 hover:bg-purple-500 text-white transition-colors shadow-md"
             >
               Get Started Free
             </Link>

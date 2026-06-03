@@ -11,7 +11,7 @@ export function Footer() {
         {/* কলাম ১: ব্রোশিওর ও ব্র্যান্ড ডেসক্রিপশন */}
         <div className="space-y-4">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 border border-indigo-500/30">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-600 border border-purple-500/30">
               <MessageSquare className="h-4 w-4 text-white" />
             </div>
             <span className="text-xl font-extrabold text-white">
