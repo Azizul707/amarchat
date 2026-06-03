@@ -1,290 +1,225 @@
+"use client";
+
+import React, { useState } from "react";
 import Link from "next/link";
+import { Navbar } from "@/components/landing/navbar";
+import { Footer } from "@/components/landing/footer";
 import { 
-  MessageSquare, 
-  Users, 
-  Zap, 
-  Shield, 
   Check, 
-  Star, 
   ArrowRight, 
-  Bot, 
-  Coins, 
-  Lock 
+  HelpCircle, 
+  Zap, 
+  ShieldCheck, 
+  Users, 
+  Radio, 
+  GitBranch, 
+  MessageSquare, 
+  Brain, 
+  ChevronDown 
 } from "lucide-react";
 
-// ৩-কলাম ভ্যালু প্রোপোজিশন ডাটা
-const features = [
-  {
-    icon: Bot,
-    title: "AI Chat Agents (Gemini/GPT)",
-    description: "Deploy intelligent, custom-trained AI agents that speak Bengali & English. Answer queries, take orders, and qualify leads 24/7.",
-  },
-  {
-    icon: Users,
-    title: "Shared Team Inbox",
-    description: "Multiple agents can log in and respond to customers using one single official WhatsApp number. No more missing chats.",
-  },
-  {
-    icon: Zap,
-    title: "Safe Bulk Broadcasting",
-    description: "Send promotional campaigns, offers, and order confirmations to thousands of contacts safely using Meta's official APIs.",
-  },
-];
+export default function HomePage() {
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
-export default function LandingPage() {
+  const toggleFaq = (idx: number) => {
+    setOpenFaq(openFaq === idx ? null : idx);
+  };
+
+  const features = [
+    { title: "টিম শেয়ার্ড ইনবক্স", desc: "এক নাম্বার থেকে পুরো টিম চ্যাট করুন", icon: Users },
+    { title: "মেটা এপিআই কানেকশন", desc: "১০০% ব্যান-মুক্ত অফিশিয়াল মেটা গেটওয়ে", icon: ShieldCheck },
+    { title: "বিকাশ/নগদ স্ক্রিনশট এআই", desc: "এআই দিয়ে ফেক পেমেন্ট স্ক্রিনশট সনাক্ত করুন", icon: Zap },
+    { title: "বাংলা ভয়েস রিডার", desc: "কাস্টমার ভয়েস মেসেজ দিলে এআই দিয়ে টেক্সট পড়ুন", icon: Brain },
+    { title: "অফলাইন সেলস চ্যাটবট", desc: "আপনার ডাটা দিয়ে ট্রেইন করা অফলাইন এআই অ্যাসিস্ট্যান্ট", icon: MessageSquare },
+    { title: "কাস্টমার পাইপলাইন ট্র্যাকিং", desc: "অর্ডার ডেলিভারি ও ফলো-আপ ট্র্যাকিং করুন", icon: GitBranch },
+  ];
+
+  const faqs = [
+    {
+      q: "মেটা হোয়াটসঅ্যাপ ক্লাউড এপিআই-এর খরচ কি এই প্ল্যানে অন্তর্ভুক্ত?",
+      a: "মেটা তাদের প্ল্যাটফর্ম ব্যবহারের জন্য প্রতিটি ২৪-ঘণ্টার কনভারসেশন উইন্ডো অনুযায়ী সামান্য চার্জ করে থাকে, যা মেটা পোর্টাল থেকে সরাসরি আপনার কার্ডের মাধ্যমে পেমেন্ট করতে হবে। আমাদের ফি শুধুমাত্র সফটওয়্যার ও হোস্টিংয়ের জন্য।",
+    },
+    {
+      q: "সফটওয়্যার ব্যবহার করার জন্য কি আমার পিসি সবসময় অন রাখতে হবে?",
+      a: "না, এটি সম্পূর্ণ ক্লাউড-বেসড সফটওয়্যার। আপনার পিসি বা মোবাইল বন্ধ থাকলেও আপনার মেসেজ রিসিভ হবে, চ্যাটবট রিপ্লাই দেবে এবং ক্যাম্পেইন সচল থাকবে।",
+    },
+    {
+      q: "আমার নম্বর ব্যান্ড (Ban) হওয়ার কোনো ঝুঁকি আছে কি?",
+      a: "একেবারেই নেই। যেহেতু আমাদের প্ল্যাটফর্ম অফিশিয়াল মেটা ক্লাউড এপিআই ব্যবহার করে কাজ করে, তাই আনঅফিশিয়াল স্ক্র্যাপার সফটওয়্যারগুলোর মতো এখানে নম্বর ব্যান্ড হওয়ার কোনো ঝুঁকি নেই।",
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col selection:bg-indigo-500/30">
-      
-      {/* ১. স্টিকি হেডার (Header Navigation) */}
-      <header className="sticky top-0 z-50 w-full border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          
-          {/* লোগো */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black shadow-md shadow-indigo-500/20 group-hover:bg-indigo-500 transition-colors">
-              a
-            </div>
-            <span className="font-extrabold text-xl tracking-tight text-white">
-              amar<span className="text-indigo-500">chat</span>
-            </span>
-          </Link>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col justify-between">
+      <div>
+        <Navbar />
 
-          {/* নেভিগেশন লিংকসমূহ */}
-          <nav className="hidden md:flex items-center gap-8">
-            <a href="#features" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-              Features
-            </a>
-            <a href="/pricing" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-              Pricing
-            </a>
-            <a href="/docs" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-              Docs
-            </a>
-          </nav>
-
-          {/* লগইন এবং সাইনআপ বাটন */}
-          <div className="flex items-center gap-4">
-            <Link href="/login" className="text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-              Log in
-            </Link>
-            <Link 
-              href="/signup" 
-              className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-all shadow-md shadow-indigo-600/20 active:scale-95"
-            >
-              Sign up
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* প্রধান কন্টেন্ট এরিয়া */}
-      <main className="flex-1">
-        
-        {/* ২. হিরো সেকশন (Hero Section) */}
+        {/* ১. হিরো সেকশন */}
         <section className="relative pt-20 pb-16 md:pt-32 md:pb-24 overflow-hidden">
-          {/* ব্যাকগ্রাউন্ড ডেকোরেশন */}
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-indigo-600/10 blur-[120px] pointer-events-none" />
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-indigo-600/5 blur-[120px] pointer-events-none" />
           
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-            {/* ব্যাজ */}
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-xs font-semibold text-indigo-400 mb-6 animate-pulse">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-xs font-semibold text-indigo-400 mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-              🇧🇩 Built for Bangladeshi E-com & F-com
+              {'🇧🇩 Built for Bangladeshi E-com & F-com'}
             </div>
-
-            {/* মেইন হেডলাইন */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white max-w-4xl mx-auto leading-[1.15]">
-              Automate Your Sales With <span className="text-indigo-500">amarchat AI</span> in Less Than 15 Minutes.
+            
+            <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.15] max-w-4xl mx-auto">
+              More Leads. Faster Follow-Up. <span className="text-purple-500">More Revenue.</span>
             </h1>
-
-            {/* সাব-হেডলাইন */}
-            <p className="mt-6 text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-              Close deals 24/7, respond instantly in Bengali/English, and save costs while avoiding number bans using Meta&apos;s Official WhatsApp API.
+            <p className="mt-6 text-sm md:text-base text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+              {'ডেলিভারি চার্জের ঝামেলা মিটাতে bKash ভেরিফিকেশন এআই, বাংলা ভয়েস ট্রান্সক্রিপশন এবং মেটা অফিশিয়াল এপিআই এর মেলবন্ধনে আপনার এফ-কমার্স ব্যবসাকে করুন সম্পূর্ণ স্বয়ংক্রিয়।'}
             </p>
-
-            {/* কল-টু-অ্যাকশন বাটন */}
+            
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link 
-                href="/signup" 
-                className="w-full sm:w-auto px-8 py-4 font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-500 transition-all shadow-[0_0_30px_rgba(99,102,241,0.4)] hover:shadow-[0_0_40px_rgba(99,102,241,0.6)] flex items-center justify-center gap-2 group active:scale-95"
-              >
-                Start Free MVP
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              <Link href="/signup" className="w-full sm:w-auto px-8 py-4 font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-500 transition-all shadow-[0_0_30px_rgba(99,102,241,0.3)] flex items-center justify-center gap-2 group active:scale-95">
+                Start Free Trial <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
-              <Link 
-                href="/login" 
-                className="w-full sm:w-auto px-8 py-4 font-bold text-zinc-300 border border-zinc-800 rounded-xl hover:bg-zinc-900/50 hover:text-white transition-all flex items-center justify-center gap-2"
-              >
+              <Link href="/login" className="w-full sm:w-auto px-8 py-4 font-bold text-zinc-300 border border-zinc-800 rounded-xl hover:bg-zinc-900/50 hover:text-white transition-all flex items-center justify-center gap-2">
                 Live Demo
               </Link>
             </div>
           </div>
-        </section>
 
-        {/* ৩. দ্য পিএএস সেকশন (The PAS Section) */}
-        <section className="py-20 bg-zinc-950/40 border-y border-zinc-900">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center">
-              <h2 className="text-3xl font-extrabold text-white sm:text-4xl tracking-tight">
-                The Hard Truth About Manual Chatting
-              </h2>
-              <p className="mt-4 text-zinc-400">
-                Are you tired of losing potential sales because your page inbox is flooded with customer messages?
-              </p>
-            </div>
-
-            <div className="mt-12 grid gap-8 md:grid-cols-2">
-              {/* পেইনপয়েন্ট ১ */}
-              <div className="p-6 rounded-xl border border-zinc-900 bg-[#09090b]/40">
-                <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 mb-4">
-                  <Coins className="w-5 h-5" />
-                </div>
-                <h3 className="font-bold text-lg text-white">Expensive Competitors</h3>
-                <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
-                  International tools like Wati or Interakt cost upwards of $40-$100 every month. For local startups and mid-sized businesses, this billing is an absolute profit killer.
-                </p>
-              </div>
-
-              {/* পেইনপয়েন্ট ২ */}
-              <div className="p-6 rounded-xl border border-zinc-900 bg-[#09090b]/40">
-                <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 mb-4">
-                  <Lock className="w-5 h-5" />
-                </div>
-                <h3 className="font-bold text-lg text-white">Risky Unofficial Tools</h3>
-                <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
-                  Using unofficial extensions or scripts to bulk-message customers often leads to permanent Meta number bans, ruining your brand&apos;s reputation overnight.
-                </p>
-              </div>
-            </div>
-
-            {/* সমাধান বা সলিউশন */}
-            <div className="mt-12 p-8 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 text-center relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
-              <h4 className="text-xl font-bold text-indigo-400">The Solution: amarchat</h4>
-              <p className="mt-3 text-sm text-zinc-300 max-w-2xl mx-auto leading-relaxed">
-                By integrating directly with **Meta&apos;s Official Cloud API**, we provide a reliable, zero-risk, and highly cost-effective dashboard. Zero-budget setup for local entrepreneurs, backed by AI automation.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* ৪. ভ্যালু প্রোপোজিশন (Features Grid) */}
-        <section id="features" className="py-20 md:py-32 scroll-mt-16">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto">
-              <h2 className="text-3xl font-extrabold text-white sm:text-4xl">
-                Supercharge Your Sales Machine
-              </h2>
-              <p className="mt-4 text-zinc-400">
-                Everything you need to scale your sales channel without hiring an army of support staff.
-              </p>
-            </div>
-
-            <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map((feature, idx) => {
-                const Icon = feature.icon;
-                return (
-                  <div 
-                    key={idx} 
-                    className="p-8 rounded-2xl border border-zinc-800 bg-[#09090b] hover:border-zinc-700 transition-all hover:-translate-y-1 duration-300"
-                  >
-                    <div className="w-12 h-12 rounded-xl bg-indigo-600/10 flex items-center justify-center text-indigo-400 mb-6">
-                      <Icon className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white">{feature.title}</h3>
-                    <p className="mt-3 text-sm text-zinc-400 leading-relaxed">{feature.description}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        {/* ৫. সোশ্যাল প্রুফ (Social Proof & Meta Badge) */}
-        <section className="py-20 bg-zinc-950/40 border-y border-zinc-900">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-16">
-              <h2 className="text-2xl font-bold text-zinc-300">Trusted by Local Businesses</h2>
-              
-              {/* মেটা পার্টনার ব্যাজ */}
-              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-zinc-800 bg-zinc-900/40 text-sm text-zinc-300 font-semibold shadow-inner">
-                <Shield className="w-5 h-5 text-indigo-500" />
-                Meta Official API Integration Secured
-              </div>
-            </div>
-
-            <div className="grid gap-8 md:grid-cols-2 max-w-4xl mx-auto">
-              {/* প্রশংসাপত্র ১ */}
-              <div className="p-8 rounded-2xl border border-zinc-800 bg-[#09090b] relative">
-                <div className="flex gap-1 text-amber-500 mb-4">
-                  {[...Array(5)].map((_, i) => <Star key={i} className="w-5 h-5 fill-current" />)}
-                </div>
-                <p className="text-zinc-300 text-sm leading-relaxed">
-                  &ldquo;Using manual agents to qualify leads was costing us 35,000 BDT/month in salary alone. With amarchat AI Agents, we now close almost 70% of standard orders automatically. Absolute gamechanger.&rdquo;
-                </p>
-                <div className="mt-6 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
-                    FM
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-white">FloraMax Agri Team</h4>
-                    <p className="text-xs text-zinc-500">Agri-Tech Business Owner</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* প্রশংসাপত্র ২ */}
-              <div className="p-8 rounded-2xl border border-zinc-800 bg-[#09090b] relative">
-                <div className="flex gap-1 text-amber-500 mb-4">
-                  {[...Array(5)].map((_, i) => <Star key={i} className="w-5 h-5 fill-current" />)}
-                </div>
-                <p className="text-zinc-300 text-sm leading-relaxed">
-                  &ldquo;I was skeptical because my previous WhatsApp number was banned when using an unofficial chrome extension. Since moving to amarchat&apos;s Meta integration, we have zero issues and instant replies.&rdquo;
-                </p>
-                <div className="mt-6 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
-                    KA
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-white">Karigor Arts</h4>
-                    <p className="text-xs text-zinc-500">F-Commerce Brand Founder</p>
-                  </div>
-                </div>
+          {/* ফ্লোটিং মকআপ ড্যাশবোর্ড উইজেট */}
+          <div className="pt-16 relative z-10 max-w-4xl mx-auto px-4">
+            <div className="rounded-2xl border border-zinc-900 bg-zinc-900/20 p-2 md:p-3 shadow-2xl shadow-indigo-500/5">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 aspect-video flex items-center justify-center">
+                <span className="text-xs text-zinc-600 font-mono">{'[ amarchat interactive dashboard mockup ]'}</span>
               </div>
             </div>
           </div>
         </section>
 
-        {/* ৬. ফাইনাল সিটিএ (Final CTA Section) */}
-        <section className="py-24 relative overflow-hidden">
-          <div className="absolute inset-0 bg-indigo-900/5 pointer-events-none" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] rounded-full bg-indigo-600/5 blur-[100px] pointer-events-none" />
+        {/* ২. আকর্ষণীয় ৫টি ট্রান্সফরমেশন সেকশন (ESLint safe) */}
+        <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20 border-t border-zinc-900 space-y-10">
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-bold text-white">amarchat ব্যবহার করলে আপনার বিজনেসে যে ৫টি পরিবর্তন আসবে:</h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <div className="p-5 rounded-xl bg-zinc-900/20 border border-zinc-900 space-y-1">
+              <span className="font-bold text-white text-sm flex items-center gap-2">
+                <span className="text-emerald-500">✅</span> মাল্টিপল এজেন্ট, জিরো ব্যান রিস্ক:
+              </span>
+              <p className="text-xs text-zinc-400 leading-relaxed pl-7">
+                {'আপনার পুরো সাপোর্ট টিম একটি WhatsApp নাম্বারেই যার যার ডিভাইস থেকে চ্যাট করবে। Official Meta API হওয়ায় আপনার গুরুত্বপূর্ণ বিজনেস নাম্বার ব্যান হওয়ার কোনো চান্সই নেই।'}
+              </p>
+            </div>
+
+            <div className="p-5 rounded-xl bg-zinc-900/20 border border-zinc-900 space-y-1">
+              <span className="font-bold text-white text-sm flex items-center gap-2">
+                <span className="text-emerald-500">✅</span> ব্রডকাস্ট ক্যাম্পেইন (অ্যাড কস্ট কমানোর জাদুকরী উপায়):
+              </span>
+              <p className="text-xs text-zinc-400 leading-relaxed pl-7">
+                {'এখন ফেসবুকে ৮ টাকা খরচ করে একটা সেল আনা আকাশ কুসুম চিন্তা। এর চেয়ে আপনার পুরনো কাস্টমারদের CSV/Excel ফাইল বাল্ক আপলোড করে সরাসরি তাদের ইনবক্সে অফার ব্রডকাস্ট করুন। সেলস আসবে বহুগুণ বেশি!'}
+              </p>
+            </div>
+
+            <div className="p-5 rounded-xl bg-zinc-900/20 border border-zinc-900 space-y-1">
+              <span className="font-bold text-white text-sm flex items-center gap-2">
+                <span className="text-emerald-500">✅</span> অর্গানাইজড ফলো-আপ (Pipeline & Tags):
+              </span>
+              <p className="text-xs text-zinc-400 leading-relaxed pl-7">
+                {'ট্যাগ ব্যবহার করে "ফ্রড" এবং "রিয়েল" কাস্টমার আলাদা করে সহজেই ফলো-আপ করতে পারবেন।'}
+              </p>
+            </div>
+
+            <div className="p-5 rounded-xl bg-zinc-900/20 border border-zinc-900 space-y-1">
+              <span className="font-bold text-white text-sm flex items-center gap-2">
+                <span className="text-emerald-500">✅</span> আপনার নিজস্ব AI অ্যাসিস্ট্যান্ট:
+              </span>
+              <p className="text-xs text-zinc-400 leading-relaxed pl-7">
+                {'রাতে বা এজেন্টরা যখন অফলাইনে থাকবে, তখন আপনার ব্যবসার ডেটা দিয়ে ট্রেইন করা RAG AI একজন দক্ষ সেলস রিপ্রেজেন্টিটিভের মতো কাস্টমারদের রিপ্লাই দিয়ে সেলস ধরে রাখবে।'}
+              </p>
+            </div>
+
+            <div className="p-5 rounded-xl bg-zinc-900/20 border border-zinc-900 space-y-1">
+              <span className="font-bold text-white text-sm flex items-center gap-2">
+                <span className="text-emerald-500">✅</span> মালিকের ১০০% কন্ট্রোল ও সিকিউরিটি:
+              </span>
+              <p className="text-xs text-zinc-400 leading-relaxed pl-7">
+                {'আপনার টিমের এজেন্টরা শুধু চ্যাট করবে। বিজনেসের সেনসিティブ ডেটা বা API Keys পুরোপুরি হাইড থাকবে, যার অ্যাক্সেস থাকবে শুধু আপনার (Owner) কাছে।'}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* ৩. সম্পূর্ণ ফিচার গ্রিড সেকশন */}
+        <section id="features" className="max-w-5xl mx-auto px-4 md:px-8 py-16 border-t border-zinc-900 space-y-12">
+          <div className="text-center space-y-3">
+            <h2 className="text-2xl md:text-4xl font-bold text-white">Everything you need to automate WhatsApp</h2>
+            <p className="text-xs md:text-sm text-zinc-400 leading-relaxed">হোয়াটসঅ্যাপের প্রিমিয়াম সিআরএম এর সমস্ত মডার্ন টুলস এখন এক জায়গায়।</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {features.map((feat, i) => (
+              <div key={i} className="rounded-xl border border-zinc-900 bg-zinc-900/10 p-5 space-y-3 hover:border-zinc-800 transition">
+                <div className="p-2 bg-zinc-950 rounded-lg w-fit border border-zinc-900">
+                  <feat.icon className="h-5 w-5 text-indigo-400" />
+                </div>
+                <h4 className="font-bold text-white text-sm">{feat.title}</h4>
+                <p className="text-xs text-zinc-400 leading-relaxed">{feat.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ৪. How it Works সেকশন */}
+        <section id="how-it-works" className="max-w-4xl mx-auto px-4 md:px-8 py-16 border-t border-zinc-900 space-y-12">
+          <div className="text-center space-y-3">
+            <h2 className="text-2xl md:text-4xl font-bold text-white">How it works</h2>
+            <p className="text-xs md:text-sm text-zinc-400">সহজ ৩টি ধাপে আপনার amarchat প্ল্যাটফর্মটি রান করুন।</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="text-center space-y-2">
+              <span className="flex size-7 items-center justify-center rounded-full bg-violet-600/10 text-violet-400 border border-violet-500/20 text-xs font-bold mx-auto">1</span>
+              <h4 className="text-sm font-bold text-white">মেটা এপিআই লিংক করুন</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">আপনার মেটা বিজনেস ম্যানেজার থেকে কাস্টম ফোন আইডি ও অ্যাক্সেস টোকেন দিয়ে কানেক্ট করুন।</p>
+            </div>
+            <div className="text-center space-y-2">
+              <span className="flex size-7 items-center justify-center rounded-full bg-violet-600/10 text-violet-400 border border-violet-500/20 text-xs font-bold mx-auto">2</span>
+              <h4 className="text-sm font-bold text-white">এআই নলেজ বেস ট্রেইন করুন</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">আপনার ব্যবসার প্রোডাক্ট ক্যাটালগ ও প্রশ্নোত্তরগুলো পেস্ট করে ১ ক্লিকে এআই এসিস্ট্যান্ট ট্রেন করুন।</p>
+            </div>
+            <div className="text-center space-y-2">
+              <span className="flex size-7 items-center justify-center rounded-full bg-violet-600/10 text-violet-400 border border-violet-500/20 text-xs font-bold mx-auto">3</span>
+              <h4 className="text-sm font-bold text-white">অটোমেটিক সেলস শুরু করুন</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">আপনার অফলাইন বা ব্যস্ত সময়ে এআই স্বয়ংক্রিয়ভাবে বাংলায় কাস্টমার হ্যান্ডেল করবে ও সেলস ক্লোজ করবে।</p>
+            </div>
+          </div>
+        </section>
+
+        {/* ৫. ড্রপডাউন FAQ সেকশন */}
+        <section className="max-w-3xl mx-auto px-4 md:px-8 py-16 border-t border-zinc-900 space-y-8">
+          <h2 className="text-xl md:text-2xl font-bold text-white text-center">সচরাচর জিজ্ঞাসিত প্রশ্নসমূহ (FAQ)</h2>
           
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-            <h2 className="text-4xl font-black text-white tracking-tight">
-              Ready to Save Costs and Sell 24/7?
-            </h2>
-            <p className="mt-4 text-zinc-400 max-w-xl mx-auto">
-              Get started with our free MVP plan today and connect your Meta developer account instantly.
-            </p>
-
-            <div className="mt-10 flex justify-center">
-              <Link 
-                href="/signup" 
-                className="px-10 py-5 font-black text-white bg-indigo-600 rounded-2xl hover:bg-indigo-500 transition-all shadow-[0_0_50px_rgba(99,102,241,0.5)] hover:shadow-[0_0_60px_rgba(99,102,241,0.7)] flex items-center gap-2 group active:scale-95"
-              >
-                Sign Up Now
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </div>
+          <div className="space-y-4">
+            {faqs.map((faq, i) => (
+              <div key={i} className="border border-zinc-900 bg-zinc-900/10 rounded-xl overflow-hidden">
+                <button
+                  onClick={() => toggleFaq(i)}
+                  className="w-full flex items-center justify-between p-5 text-left text-sm font-semibold text-zinc-200 hover:bg-zinc-900/40 transition"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <HelpCircle className="h-4 w-4 text-indigo-400 shrink-0" />
+                    {faq.q}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${openFaq === i ? "rotate-180" : ""}`} />
+                </button>
+                {openFaq === i && (
+                  <div className="p-5 pt-0 text-xs text-zinc-400 leading-relaxed border-t border-zinc-900 pl-11">
+                    {faq.a}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </section>
-      </main>
+      </div>
 
-      {/* ফুটার */}
-      <footer className="border-t border-zinc-900 bg-[#09090b] py-8 text-center text-xs text-zinc-600">
-        <p>&copy; {new Date().getFullYear()} amarchat. All rights reserved.</p>
-      </footer>
+      <Footer />
     </div>
   );
 }
