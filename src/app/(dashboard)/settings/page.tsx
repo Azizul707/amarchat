@@ -19,7 +19,6 @@ import {
   Zap, 
   Brain 
 } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspace } from '@/providers/workspace-provider';
 import { toast } from 'sonner';
@@ -29,6 +28,7 @@ import { TagManager } from '@/components/settings/tag-manager';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
+import { cn } from '@/lib/utils';
 
 // নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
 import KnowledgeBaseSettings from './knowledge-base/page';
@@ -617,191 +617,231 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => onChange(v as TabValue)}>
-        <TabsList className="bg-slate-900 border border-slate-700 flex flex-wrap">
-          {/* Profile Tab */}
-          <TabsTrigger
-            value="profile"
-            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        {/* Settings Secondary Sidebar (চ্যাটসিঙ্কস স্টাইল ভার্টিক্যাল সাইডবার) */}
+        <div className="w-full md:w-56 shrink-0 bg-slate-900/30 border border-slate-800 rounded-xl p-2 flex flex-col gap-1">
+          
+          {/* General Settings Category */}
+          <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 py-1.5 block">
+            General Settings
+          </span>
+          
+          <button
+            onClick={() => onChange('profile')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+              tab === 'profile'
+                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+            )}
           >
             <User className="size-4" />
-            Profile
-          </TabsTrigger>
+            <span>Profile Settings</span>
+          </button>
 
-          {/* Workspace Tab */}
           {isOwner && (
-            <TabsTrigger
-              value="workspace"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
-            >
-              <Briefcase className="size-4" />
-              Workspace
-            </TabsTrigger>
+            <>
+              <button
+                onClick={() => onChange('workspace')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'workspace'
+                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <Briefcase className="size-4" />
+                <span>Workspace Details</span>
+              </button>
+
+              <button
+                onClick={() => onChange('team')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'team'
+                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <Users className="size-4" />
+                <span>Team Management</span>
+              </button>
+
+              {/* AI & Automation Category */}
+              <div className="my-1 border-t border-slate-850" />
+              <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 py-1.5 block">
+                AI & Automation
+              </span>
+
+              <button
+                onClick={() => onChange('ai')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'ai'
+                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <Zap className="size-4" />
+                <span>AI Chatbot Setup</span>
+              </button>
+
+              <button
+                onClick={() => onChange('kb')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'kb'
+                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <Brain className="size-4" />
+                <span>AI Sales Training</span>
+              </button>
+
+              <button
+                onClick={() => onChange('whatsapp')}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                  tab === 'whatsapp'
+                    ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                    : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+                )}
+              >
+                <Settings className="size-4" />
+                <span>WhatsApp Config</span>
+              </button>
+            </>
           )}
 
-          {/* Team Tab */}
-          {isOwner && (
-            <TabsTrigger
-              value="team"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
-            >
-              <Users className="size-4" />
-              Team
-            </TabsTrigger>
-          )}
+          {/* CRM Properties Category */}
+          <div className="my-1 border-t border-slate-850" />
+          <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 py-1.5 block">
+            CRM Properties
+          </span>
 
-          {/* New AI Chatbot Tab */}
-          {isOwner && (
-            <TabsTrigger
-              value="ai"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
-            >
-              <Zap className="size-4" />
-              AI Chatbot
-            </TabsTrigger>
-          )}
-
-          {/* New AI Training (RAG) Tab */}
-          {isOwner && (
-            <TabsTrigger
-              value="kb"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
-            >
-              <Brain className="size-4" />
-              AI Training
-            </TabsTrigger>
-          )}
-
-          {/* WhatsApp Settings Tab */}
-          {isOwner && (
-            <TabsTrigger
-              value="whatsapp"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
-            >
-              <Settings className="size-4" />
-              WhatsApp Config
-            </TabsTrigger>
-          )}
-
-          {/* Message Templates Tab */}
-          <TabsTrigger
-            value="templates"
-            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+          <button
+            onClick={() => onChange('templates')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+              tab === 'templates'
+                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+            )}
           >
             <MessageSquare className="size-4" />
-            Templates
-          </TabsTrigger>
+            <span>Broadcast Templates</span>
+          </button>
 
-          {/* Tag Manager Tab */}
-          <TabsTrigger
-            value="tags"
-            className="data-[state=active]:bg-slate-800 data-[state=active]:text-violet-400 text-slate-400"
+          <button
+            onClick={() => onChange('tags')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+              tab === 'tags'
+                ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+            )}
           >
             <Tag className="size-4" />
-            Tags
-          </TabsTrigger>
-        </TabsList>
+            <span>Tag Manager</span>
+          </button>
+        </div>
 
-        {/* PROFILE TAB CONTENT */}
-        <TabsContent value="profile" className="space-y-6">
-          <ProfileForm />
-          <PasswordForm />
-          <SessionsCard />
-        </TabsContent>
+        {/* Active Settings Tab Content Area */}
+        <div className="flex-1 w-full space-y-6">
+          {tab === 'profile' && (
+            <div className="space-y-6">
+              <ProfileForm />
+              <PasswordForm />
+              <SessionsCard />
+            </div>
+          )}
 
-        {/* WORKSPACE TAB CONTENT */}
-        {isOwner && (
-          <TabsContent value="workspace" className="space-y-6">
+          {tab === 'workspace' && isOwner && (
             <WorkspaceForm />
-          </TabsContent>
-        )}
+          )}
 
-        {/* TEAM TAB CONTENT */}
-        {isOwner && (
-          <TabsContent value="team" className="space-y-6">
+          {tab === 'team' && isOwner && (
             <TeamForm />
-          </TabsContent>
-        )}
+          )}
 
-        {/* AI TAB CONTENT */}
-        {isOwner && (
-          <TabsContent value="ai" className="space-y-6">
+          {tab === 'ai' && isOwner && (
             <AIForm />
-          </TabsContent>
-        )}
-
-        {/* AI TRAINING (RAG) TAB CONTENT */}
-        {isOwner && (
-          <TabsContent value="kb">
-            {!mounted || checkingStatus ? (
-              <div className="flex h-48 items-center justify-center">
-                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
-              </div>
-            ) : isLocked ? (
-              <LockedTabCard 
-                title="AI Training (Knowledge Base)" 
-                onRefresh={handleRefreshStatus}
-                checking={checkingStatus}
-              />
-            ) : (
-              <KnowledgeBaseSettings />
-            )}
-          </TabsContent>
-        )}
-
-        {/* WHATSAPP TAB CONTENT */}
-        {isOwner && (
-          <TabsContent value="whatsapp">
-            {!mounted || checkingStatus ? (
-              <div className="flex h-48 items-center justify-center">
-                <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
-              </div>
-            ) : isLocked ? (
-              <LockedTabCard 
-                title="WhatsApp Integration" 
-                onRefresh={handleRefreshStatus}
-                checking={checkingStatus}
-              />
-            ) : (
-              <WhatsAppConfig />
-            )}
-          </TabsContent>
-        )}
-
-        {/* TEMPLATES TAB CONTENT */}
-        <TabsContent value="templates">
-          {!mounted || checkingStatus ? (
-            <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
-            </div>
-          ) : isLocked ? (
-            <LockedTabCard 
-              title="Template Manager" 
-              onRefresh={handleRefreshStatus}
-              checking={checkingStatus}
-            />
-          ) : (
-            <TemplateManager />
           )}
-        </TabsContent>
 
-        {/* TAGS TAB CONTENT */}
-        <TabsContent value="tags">
-          {!mounted || checkingStatus ? (
-            <div className="flex h-48 items-center justify-center">
-              <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
-            </div>
-          ) : isLocked ? (
-            <LockedTabCard 
-              title="Tag Manager" 
-              onRefresh={handleRefreshStatus}
-              checking={checkingStatus}
-            />
-          ) : (
-            <TagManager />
+          {tab === 'kb' && isOwner && (
+            <>
+              {!mounted || checkingStatus ? (
+                <div className="flex h-48 items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : isLocked ? (
+                <LockedTabCard 
+                  title="AI Training (Knowledge Base)" 
+                  onRefresh={handleRefreshStatus}
+                  checking={checkingStatus}
+                />
+              ) : (
+                <KnowledgeBaseSettings />
+              )}
+            </>
           )}
-        </TabsContent>
-      </Tabs>
+
+          {tab === 'whatsapp' && isOwner && (
+            <>
+              {!mounted || checkingStatus ? (
+                <div className="flex h-48 items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : isLocked ? (
+                <LockedTabCard 
+                  title="WhatsApp Integration" 
+                  onRefresh={handleRefreshStatus}
+                  checking={checkingStatus}
+                />
+              ) : (
+                <WhatsAppConfig />
+              )}
+            </>
+          )}
+
+          {tab === 'templates' && (
+            <>
+              {!mounted || checkingStatus ? (
+                <div className="flex h-48 items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : isLocked ? (
+                <LockedTabCard 
+                  title="Template Manager" 
+                  onRefresh={handleRefreshStatus}
+                  checking={checkingStatus}
+                />
+              ) : (
+                <TemplateManager />
+              )}
+            </>
+          )}
+
+          {tab === 'tags' && (
+            <>
+              {!mounted || checkingStatus ? (
+                <div className="flex h-48 items-center justify-center">
+                  <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : isLocked ? (
+                <LockedTabCard 
+                  title="Tag Manager" 
+                  onRefresh={handleRefreshStatus}
+                  checking={checkingStatus}
+                />
+              ) : (
+                <TagManager />
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
