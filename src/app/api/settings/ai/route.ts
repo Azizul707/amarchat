@@ -88,7 +88,7 @@ export async function POST(request: Request) {
 
     if (fetchError) {
       console.error('Failed to query existing AI config:', fetchError.message)
-      return NextResponse.json({ error: 'Database verification failed' }, { status: 500 })
+      return NextResponse.json({ error: `Verification failed: ${fetchError.message}` }, { status: 500 })
     }
 
     let saveError = null
@@ -103,7 +103,6 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString()
       }
 
-      // এপিআই কি ফিল্ড ফর্মে দিলে তবেই আপডেট হবে, খালি রাখলে পূর্বের কি অপরিবর্তিত থাকবে
       if (encryptedApiKey) {
         updateData.openai_api_key = encryptedApiKey
       }
@@ -132,13 +131,16 @@ export async function POST(request: Request) {
     }
 
     if (saveError) {
-      console.error('Failed to save AI config database action:', saveError.message)
-      return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 })
+      console.error('Failed to save AI config database action:', saveError)
+      // রিয়েল-টাইম এরর মেসেজ সরাসরি ব্রাউজার নোটিফিকেশনে পুশ করার জন্য মেসেজ রিটার্ন
+      return NextResponse.json({ 
+        error: `Database Error: ${saveError.message} (Code: ${saveError.code || 'N/A'}. Details: ${saveError.details || 'None'})` 
+      }, { status: 500 })
     }
 
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (err) {
     console.error('POST AI Config Error:', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: `Internal Server Catch: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 })
   }
 }
