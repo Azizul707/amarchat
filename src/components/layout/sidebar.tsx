@@ -17,6 +17,7 @@ import {
   LogOut,
   User,
   X,
+  Brain,
 } from "lucide-react";
 import {
   Avatar,
@@ -31,19 +32,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/contacts", label: "Contacts", icon: Users },
-  { href: "/pipelines", label: "Pipelines", icon: GitBranch },
-  { href: "/broadcasts", label: "Broadcasts", icon: Radio },
-  { href: "/automations", label: "Automations", icon: Zap },
-];
-
-const bottomNavItems = [
-  { href: "/settings", label: "Settings", icon: Settings },
-];
-
 interface SidebarProps {
   /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
   open?: boolean;
@@ -55,16 +43,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const totalUnread = useTotalUnread();
 
-  // Close the drawer when route changes — users opened it to navigate,
-  // so once they pick a destination the drawer should get out of the way.
+  // Route পরিবর্তন হলে মোবাইল ড্রয়ার অটোমেটিক বন্ধ হবে
   useEffect(() => {
     onClose?.();
-    // Only pathname drives this — onClose identity doesn't need to re-run it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, onClose]);
 
-  // Lock body scroll and allow Escape to close while the drawer is open on
-  // mobile. No-ops on desktop because the sidebar isn't positioned there.
+  // মোবাইল ড্রয়ার ওপেন থাকা অবস্থায় বডি স্ক্রল লক
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -79,11 +63,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     };
   }, [open, onClose]);
 
+  // টাইপস্ক্রিপ্ট কম্পাইলেশন এরর (TS2339) এড়াতে এক্সপ্লিসিট টাইপ কাস্টিং সেভগার্ড
+  const isOwner = !!(profile as { is_approved?: boolean | null })?.is_approved;
+
   return (
     <>
-      {/* Backdrop — only exists on mobile and only when open. Clicking
-          it closes the drawer. Hidden from lg+ since the sidebar is
-          part of the main flex row there. */}
+      {/* Backdrop (মোবাইলের জন্য ব্যাকড্রপ ব্লার) */}
       <button
         type="button"
         aria-label="Close menu"
@@ -98,30 +83,26 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-slate-800 bg-slate-900",
+          // ChatSyncs ডার্ক লাক্সারি লাউঞ্জ থিম
+          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-slate-900 bg-slate-950",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
-          // Desktop: static, always visible — reset all the mobile framing.
           "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
         )}
         aria-label="Primary"
       >
-        {/* Logo row. On mobile we put a close button here; on desktop the
-            close button is hidden since the sidebar is always-visible. */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-4">
+        {/* Logo row (amar - chat স্প্লিট রিব্র্যান্ডেড লোগো) */}
+        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-900 px-4">
           <Link href="/dashboard" className="flex items-center gap-2.5">
-            {/* amarchat রিব্র্যান্ডেড লোগো আইকন */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500 shadow-sm shadow-violet-500/20">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 shadow-sm shadow-violet-500/25 border border-violet-500/30">
               <MessageSquare className="h-4 w-4 text-white" />
             </div>
             
-            {/* নতুন ব্র্যান্ড নেম ও সাবটাইটেল */}
             <div className="flex flex-col">
-              <span className="text-base font-extrabold tracking-tight text-white leading-none">
-                amar<span className="text-violet-500">chat</span>
+              <span className="text-base font-extrabold tracking-tight leading-none">
+                <span className="text-white">amar</span><span className="text-purple-500">chat</span>
               </span>
-              <span className="text-[10px] font-medium tracking-wider text-slate-500 uppercase leading-none mt-1">
+              <span className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase leading-none mt-1">
                 WhatsApp CRM
               </span>
             </div>
@@ -130,99 +111,211 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label="Close menu"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 hover:bg-slate-900 hover:text-white lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Main navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href));
+        {/* Main navigation (ক্যাটাগরি ভিত্তিক গ্রুপড লিস্ট) */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-none">
+          
+          {/* CATEGORY 1: CORE */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 block">
+              Core
+            </span>
+            <ul className="flex flex-col gap-1">
+              <li>
+                <Link
+                  href="/dashboard"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname === "/dashboard"
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  <span>Dashboard</span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/inbox"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/inbox")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="flex-1">Inbox</span>
+                  {totalUnread > 0 && (
+                    <span
+                      aria-label={`${totalUnread} unread conversation`}
+                      className="relative flex h-2 w-2"
+                    >
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
+                    </span>
+                  )}
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/contacts"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/contacts")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <Users className="h-4 w-4" />
+                  <span>Contacts</span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/pipelines"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/pipelines")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <GitBranch className="h-4 w-4" />
+                  <span>Pipelines</span>
+                </Link>
+              </li>
+            </ul>
+          </div>
 
-              const showUnreadDot =
-                item.href === "/inbox" && totalUnread > 0 && !isActive;
+          {/* CATEGORY 2: MARKETING */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 block">
+              Marketing
+            </span>
+            <ul className="flex flex-col gap-1">
+              <li>
+                <Link
+                  href="/broadcasts"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/broadcasts")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <Radio className="h-4 w-4" />
+                  <span>Broadcasts</span>
+                </Link>
+              </li>
+            </ul>
+          </div>
 
-              return (
-                <li key={item.href}>
+          {/* CATEGORY 3: AI & AUTOMATION */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 block">
+              AI & Automation
+            </span>
+            <ul className="flex flex-col gap-1">
+              <li>
+                <Link
+                  href="/automations"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/automations")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <Zap className="h-4 w-4" />
+                  <span>Automations</span>
+                </Link>
+              </li>
+              {isOwner && (
+                <li>
                   <Link
-                    href={item.href}
+                    href="/settings?tab=kb"
                     className={cn(
-                      // Taller on mobile so fingers can hit the row reliably (≥44px).
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-violet-500/10 text-violet-500"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-white",
+                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      pathname.startsWith("/settings") && pathname.includes("tab=kb")
+                        ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                        : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
                     )}
                   >
-                    <item.icon className="h-4 w-4" />
-                    <span className="flex-1">{item.label}</span>
-                    {showUnreadDot && (
-                      <span
-                        aria-label={`${totalUnread} unread conversation${totalUnread === 1 ? "" : "s"}`}
-                        className="relative flex h-2 w-2"
-                      >
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
-                      </span>
-                    )}
+                    <Brain className="h-4 w-4" />
+                    <span>AI Training</span>
                   </Link>
                 </li>
-              );
-            })}
-          </ul>
+              )}
+            </ul>
+          </div>
 
-          <div className="my-4 border-t border-slate-800" />
+          {/* CATEGORY 4: MANAGEMENT */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase px-3 block">
+              Management
+            </span>
+            <ul className="flex flex-col gap-1">
+              <li>
+                <Link
+                  href="/settings"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    pathname.startsWith("/settings") && !pathname.includes("tab=kb")
+                      ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      : "text-slate-400 hover:bg-slate-900/60 hover:text-white",
+                  )}
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </Link>
+              </li>
+            </ul>
+          </div>
 
-          <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-violet-500/10 text-violet-500"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-white",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
         </nav>
 
-        {/* User section */}
-        <div className="shrink-0 border-t border-slate-800 p-3">
+        {/* User section (রিসেন্টলি আপডেট হওয়া প্রফেশনাল ADMIN/AGENT প্রোফাইল কার্ড) */}
+        <div className="shrink-0 border-t border-slate-900 p-3 bg-slate-950">
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-800/60 focus:bg-slate-800/60 focus:outline-none data-popup-open:bg-slate-800/60">
-              <Avatar className="size-8 shrink-0">
+            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-900/60 focus:bg-slate-900/60 focus:outline-none focus:ring-0">
+              <Avatar className="size-8 shrink-0 border border-slate-800">
                 {profile?.avatar_url ? (
                   <AvatarImage
                     src={profile.avatar_url}
                     alt={profile.full_name ?? "Avatar"}
                   />
                 ) : null}
-                <AvatarFallback className="bg-violet-500/10 text-sm font-medium text-violet-500">
+                <AvatarFallback className="bg-violet-500/10 text-sm font-medium text-violet-400">
                   {profile?.full_name?.charAt(0)?.toUpperCase() ??
                     profile?.email?.charAt(0)?.toUpperCase() ??
                     "U"}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white">
-                  {profile?.full_name ?? "User"}
-                </p>
-                <p className="truncate text-xs text-slate-400">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-sm font-semibold text-white leading-none">
+                    {profile?.full_name ?? "User"}
+                  </p>
+                  
+                  {/* কাস্টম সিকিউরড ওনার ব্যাজ (ADMIN/AGENT) */}
+                  {isOwner ? (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20 leading-none">
+                      ADMIN
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-800 text-slate-400 border border-slate-750 leading-none">
+                      AGENT
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-xs text-slate-500 mt-1 leading-none">
                   {profile?.email ?? ""}
                 </p>
               </div>
@@ -231,18 +324,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               align="end"
               side="top"
               sideOffset={6}
-              className="min-w-56 bg-slate-900 text-slate-100 ring-slate-700"
+              className="min-w-56 bg-slate-950 text-slate-100 ring-slate-800 border border-slate-900"
             >
               <DropdownMenuItem
                 render={
                   <Link
                     href="/settings?tab=profile"
                     onClick={onClose}
-                    className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                    className="text-slate-200 focus:bg-slate-900 focus:text-white"
                   />
                 }
               >
-                <User className="size-4" />
+                <User className="size-4 text-slate-400" />
                 Profile
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -250,19 +343,19 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   <Link
                     href="/settings?tab=whatsapp"
                     onClick={onClose}
-                    className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                    className="text-slate-200 focus:bg-slate-900 focus:text-white"
                   />
                 }
               >
-                <Settings className="size-4" />
+                <Settings className="size-4 text-slate-400" />
                 Settings
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-slate-800" />
+              <DropdownMenuSeparator className="bg-slate-900" />
               <DropdownMenuItem
                 onClick={signOut}
-                className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                className="text-slate-200 focus:bg-slate-900 focus:text-white cursor-pointer"
               >
-                <LogOut className="size-4" />
+                <LogOut className="size-4 text-slate-400" />
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
