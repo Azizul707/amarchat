@@ -67,23 +67,9 @@ const emptyForm: TemplateFormData = {
 };
 
 const COMMON_LANGUAGE_CODES = [
-  'en_US',
-  'en_GB',
-  'en',
-  'es',
-  'es_ES',
-  'es_MX',
-  'fr',
-  'fr_FR',
-  'de',
-  'it',
-  'pt_BR',
-  'pt_PT',
-  'nl',
-  'pl',
-  'ru',
-  'tr',
-  'lt',
+  'bn',    // বাংলা (Bangladesh)
+  'en_US', // English (US)
+  'en_GB', // English (UK)
 ];
 
 export function TemplateManager() {
