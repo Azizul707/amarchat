@@ -11,23 +11,45 @@ export function GoogleSheetsConfig() {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // গুগল অ্যাপস স্ক্রিপ্ট কোড ব্লকের টেক্সট
+  // গুগল অ্যাপস স্ক্রিপ্টের আপডেট করা ডাইনামিক কোড ব্লক
   const appsScriptCode = `function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Orders");
-  var data = JSON.parse(e.postData.contents);
-  
-  sheet.appendRow([
-    data.customer_name,
-    data.address,
-    data.mobile,
-    data.product_sku_or_name,
-    data.size || "",
-    data.color || "",
-    data.quantity || 1,
-    new Date().toISOString()
-  ]);
-  
-  return ContentService.createTextOutput(JSON.stringify({status: "success"}))
+  try {
+    // আপনার স্প্রেডশিট আইডি (কপি করার সময় স্বয়ংক্রিয়ভাবে বসে যাবে)
+    var sheetId = "YOUR_SPREADSHEET_ID_HERE"; 
+    
+    var doc = SpreadsheetApp.openById(sheetId);
+    
+    // স্পেলিং বা অদৃশ্য স্পেসের ভুল এড়াতে নাম দিয়ে অথবা স্বয়ংক্রিয়ভাবে স্প্রেডশিটের ২য় ট্যাবটি ইনডেক্স (Index 1) দিয়ে লোড করা হচ্ছে
+    var sheet = doc.getSheetByName("Orders") || doc.getSheets()[1];
+    
+    if (!sheet) {
+      throw new Error("Orders tab not found in the spreadsheet.");
+    }
+    
+    var data = JSON.parse(e.postData.contents);
+    
+    sheet.appendRow([
+      data.customer_name,
+      data.address,
+      data.mobile,
+      data.product_sku_or_name,
+      data.size || "",
+      data.color || "",
+      data.quantity || 1,
+      new Date().toISOString()
+    ]);
+    
+    return ContentService.createTextOutput(JSON.stringify({status: "success"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    console.error(err);
+    return ContentService.createTextOutput(JSON.stringify({status: "error", message: err.message}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({status: "success", message: "doGet active"}))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
 
@@ -85,9 +107,13 @@ export function GoogleSheetsConfig() {
   };
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(appsScriptCode);
+    const personalSheetId = sheetId.trim() || 'YOUR_SPREADSHEET_ID_HERE';
+    // ব্যবহারকারীর ইনপুট করা স্প্রেডশিট আইডি কোডে রিপ্লেস করে দেওয়া হচ্ছে
+    const personalizedCode = appsScriptCode.replace('YOUR_SPREADSHEET_ID_HERE', personalSheetId);
+    
+    navigator.clipboard.writeText(personalizedCode);
     setCopied(true);
-    toast.success('Apps Script code copied to clipboard!');
+    toast.success('Personalized Apps Script code copied!');
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -156,7 +182,7 @@ export function GoogleSheetsConfig() {
         </div>
       </form>
 
-      {/* RIGHT COLUMN: Instructions Box (Aligned with WhatsApp Config design) */}
+      {/* RIGHT COLUMN: Instructions Box */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5 space-y-6">
         <h4 className="text-sm font-bold text-white tracking-wide">Google Sheets Setup</h4>
         
@@ -205,7 +231,7 @@ export function GoogleSheetsConfig() {
               
               <div className="relative mt-2 rounded bg-slate-950 border border-slate-850 p-2">
                 <pre className="text-[8px] font-mono text-slate-400 overflow-x-auto max-h-36 scrollbar-thin">
-                  {appsScriptCode}
+                  {appsScriptCode.replace('YOUR_SPREADSHEET_ID_HERE', sheetId.trim() || 'YOUR_SPREADSHEET_ID')}
                 </pre>
                 <button
                   onClick={handleCopyCode}
