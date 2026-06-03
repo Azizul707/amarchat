@@ -94,12 +94,11 @@ export async function POST(request: Request) {
     let saveError = null
 
     if (existingConfig) {
-      // ২. ডাটা থাকলে: শুধুমাত্র UPDATE কোয়েরি রান হবে
+      // ২. ডাটা থাকলে: শুধুমাত্র UPDATE কোয়েরি রান হবে (স্ট্যাটাস কলাম পরিবর্তন করা হচ্ছে না)
       const updateData: Record<string, unknown> = {
         ai_prompt: prompt,
         ai_base_url: baseUrl,
         ai_model: model,
-        status: 'active',
         updated_at: new Date().toISOString()
       }
 
@@ -113,7 +112,7 @@ export async function POST(request: Request) {
         .eq('workspace_id', profile.workspace_id)
       saveError = error
     } else {
-      // ৩. ডাটা না থাকলে: নতুন রো হিসেবে INSERT কোয়েরি রান হবে
+      // ৩. ডাটা না থাকলে: নতুন রো হিসেবে INSERT কোয়েরি রান হবে (কন্সট্রেইন্ট মেনে 'connected' দেওয়া হয়েছে)
       const { error } = await supabase
         .from('whatsapp_config')
         .insert({
@@ -123,7 +122,7 @@ export async function POST(request: Request) {
           ai_prompt: prompt,
           ai_base_url: baseUrl,
           ai_model: model,
-          status: 'active',
+          status: 'connected', 
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
@@ -132,7 +131,6 @@ export async function POST(request: Request) {
 
     if (saveError) {
       console.error('Failed to save AI config database action:', saveError)
-      // রিয়েল-টাইম এরর মেসেজ সরাসরি ব্রাউজার নোটিফিকেশনে পুশ করার জন্য মেসেজ রিটার্ন
       return NextResponse.json({ 
         error: `Database Error: ${saveError.message} (Code: ${saveError.code || 'N/A'}. Details: ${saveError.details || 'None'})` 
       }, { status: 500 })
