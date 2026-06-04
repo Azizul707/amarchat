@@ -578,7 +578,7 @@ export default function SettingsPage() {
 
   const isOwner = !!activeApproved;
 
-  // সিকিউরিটি এক্সেস গার্ড পলিসি (Unapproved ওনাররাও যেন অ্যাক্সেস করতে পারেন)
+  // সিকিউরিটি অ্যাক্সেস পলিসি থেকে 'billing' কন্ডিশন সম্পূর্ণ রিমুভ করা হয়েছে যাতে আনপেইড কাস্টমাররা পেমেন্ট পেজে ঢুকতে পারেন
   useEffect(() => {
     if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets'].includes(tab)) {
       setTab('profile');
@@ -703,7 +703,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'whatsapp'
-                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-violet-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -758,21 +758,19 @@ export default function SettingsPage() {
             <span>Tag Manager</span>
           </button>
 
-          {/* BILLING & UPGRADES BUTTON IS NOW GLOBALLY VISIBLE OUTSIDE isOwner */}
-          {isOwner && (
-            <button
-              onClick={() => onChange('billing')}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
-                tab === 'billing'
-                  ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                  : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
-              )}
-            >
-              <CreditCard className="size-4" />
-              <span>Billing & Upgrades</span>
-            </button>
-          )}
+          {/* BILLING & UPGRADES BUTTON IS NOW GLOBALLY VISIBLE FOR ALL USERS (OUTSIDE isOwner) */}
+          <button
+            onClick={() => onChange('billing')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+              tab === 'billing'
+                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+            )}
+          >
+            <CreditCard className="size-4" />
+            <span>Billing & Upgrades</span>
+          </button>
         </div>
 
         {/* Active Settings Tab Content Area */}
@@ -852,7 +850,7 @@ export default function SettingsPage() {
           )}
 
           {/* BILLING IS GLOBALLY RENDERED WITH isApproved PROP PASSED */}
-          {tab === 'billing' && isOwner && (
+          {tab === 'billing' && (
             <BillingConfig isApproved={isOwner} />
           )}
 
