@@ -15,7 +15,11 @@ interface PaymentRequest {
   created_at: string;
 }
 
-export function BillingConfig() {
+interface BillingConfigProps {
+  isApproved?: boolean; // ওনার প্যানেলের ডাইনামিক এপ্রুভাল স্টেট
+}
+
+export function BillingConfig({ isApproved = false }: BillingConfigProps) {
   const [paymentMethod, setPaymentMethod] = useState<'bkash' | 'nagad'>('bkash');
   const [senderNumber, setSenderNumber] = useState('');
   const [transactionId, setTransactionId] = useState('');
@@ -89,7 +93,10 @@ export function BillingConfig() {
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    // ডাইনামিক ফ্রন্টএন্ড ওভাররাইড লজিক: ইউজার যদি প্রোফাইলে অলরেডি এপ্রুভড হয়ে যায়, তবে স্ট্যাটাস এপ্রুভড দেখাবে
+    const effectiveStatus = isApproved ? 'approved' : status;
+
+    switch (effectiveStatus) {
       case 'approved':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
