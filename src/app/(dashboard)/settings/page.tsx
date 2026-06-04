@@ -18,7 +18,8 @@ import {
   ShieldAlert, 
   Zap, 
   Brain,
-  FileSpreadsheet
+  FileSpreadsheet,
+  CreditCard
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkspace } from '@/providers/workspace-provider';
@@ -30,12 +31,13 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { PasswordForm } from '@/components/settings/password-form';
 import { SessionsCard } from '@/components/settings/sessions-card';
 import { GoogleSheetsConfig } from '@/components/settings/google-sheets-config';
+import { BillingConfig } from '@/components/settings/billing-config';
 import { cn } from '@/lib/utils';
 
 // নলেজ বেস কম্পোনেন্ট ইম্পোর্ট
 import KnowledgeBaseSettings from './knowledge-base/page';
 
-const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets', 'templates', 'tags'] as const;
+const TAB_VALUES = ['profile', 'workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets', 'billing', 'templates', 'tags'] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 function isTabValue(v: string | null): v is TabValue {
@@ -258,7 +260,7 @@ function TeamForm() {
         </div>
         
         <p className="text-xs text-amber-500 leading-normal font-sans">
-          📌 নোট: এজেন্টকে আমাদের প্ল্যাটফর্ম অবশ্যই আগে একটি অ্যাকাউন্ট তৈরি (Sign Up) করতে হবে। অন্যথায় ইমেইলটি ডাটাবেসে খুঁজে পাওয়া যাবে না।
+          📌 নোট: এজেন্টকে আমাদের প্ল্যাটফর্মে অবশ্যই আগে একটি অ্যাকাউন্ট তৈরি (Sign Up) করতে হবে। অন্যথায় ইমেইলটি ডাটাবেসে খুঁজে পাওয়া যাবে না।
         </p>
       </form>
 
@@ -577,7 +579,7 @@ export default function SettingsPage() {
   const isOwner = !!activeApproved;
 
   useEffect(() => {
-    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets'].includes(tab)) {
+    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets', 'billing'].includes(tab)) {
       setTab('profile');
       const params = new URLSearchParams(searchParams.toString());
       params.set('tab', 'profile');
@@ -700,7 +702,7 @@ export default function SettingsPage() {
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
                   tab === 'whatsapp'
-                    ? "bg-purple-500/10 text-purple-400 border border-violet-500/20"
+                    ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                     : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
                 )}
               >
@@ -708,7 +710,6 @@ export default function SettingsPage() {
                 <span>WhatsApp Config</span>
               </button>
 
-              {/* NEW GOOGLE SHEETS TAB */}
               <button
                 onClick={() => onChange('sheets')}
                 className={cn(
@@ -755,6 +756,22 @@ export default function SettingsPage() {
             <Tag className="size-4" />
             <span>Tag Manager</span>
           </button>
+
+          {/* NEW IN-APP BILLING TAB */}
+          {isOwner && (
+            <button
+              onClick={() => onChange('billing')}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+                tab === 'billing'
+                  ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                  : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+              )}
+            >
+              <CreditCard className="size-4" />
+              <span>Billing & Upgrades</span>
+            </button>
+          )}
         </div>
 
         {/* Active Settings Tab Content Area */}
@@ -831,6 +848,10 @@ export default function SettingsPage() {
                 <GoogleSheetsConfig />
               )}
             </>
+          )}
+
+          {tab === 'billing' && isOwner && (
+            <BillingConfig />
           )}
 
           {tab === 'templates' && (
