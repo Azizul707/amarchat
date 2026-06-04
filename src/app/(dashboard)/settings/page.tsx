@@ -459,7 +459,7 @@ function AIForm() {
 // ==================== LOCKED TAB CARD COMPONENT ====================
 function LockedTabCard({ title, onRefresh, checking }: { title: string; onRefresh: () => void; checking: boolean }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-red-500/10 bg-slate-950/40 p-8 md:p-12 text-center shadow-lg">
+    <div className="relative overflow-hidden rounded-xl border border-red-500/10 bg-slate-955/40 p-8 md:p-12 text-center shadow-lg">
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full bg-red-500/5 blur-3xl pointer-events-none" />
       
       <div className="relative z-10 max-w-md mx-auto space-y-5">
@@ -578,8 +578,9 @@ export default function SettingsPage() {
 
   const isOwner = !!activeApproved;
 
+  // সিকিউরিটি অ্যাক্সেস পলিসি থেকে 'billing' কন্ডিশন সম্পূর্ণ রিমুভ করা হয়েছে যাতে আনপেইড কাস্টমাররা পেমেন্ট পেজে ঢুকতে পারেন
   useEffect(() => {
-    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets', 'billing'].includes(tab)) {
+    if (mounted && !isOwner && ['workspace', 'team', 'ai', 'kb', 'whatsapp', 'sheets'].includes(tab)) {
       setTab('profile');
       const params = new URLSearchParams(searchParams.toString());
       params.set('tab', 'profile');
@@ -757,21 +758,19 @@ export default function SettingsPage() {
             <span>Tag Manager</span>
           </button>
 
-          {/* NEW IN-APP BILLING TAB */}
-          {isOwner && (
-            <button
-              onClick={() => onChange('billing')}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
-                tab === 'billing'
-                  ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                  : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
-              )}
-            >
-              <CreditCard className="size-4" />
-              <span>Billing & Upgrades</span>
-            </button>
-          )}
+          {/* BILLING & UPGRADES BUTTON IS NOW GLOBALLY VISIBLE (OUTSIDE isOwner CHECK) */}
+          <button
+            onClick={() => onChange('billing')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full cursor-pointer",
+              tab === 'billing'
+                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                : "text-slate-400 hover:bg-slate-900/60 hover:text-white border border-transparent"
+            )}
+          >
+            <CreditCard className="size-4" />
+            <span>Billing & Upgrades</span>
+          </button>
         </div>
 
         {/* Active Settings Tab Content Area */}
@@ -850,7 +849,8 @@ export default function SettingsPage() {
             </>
           )}
 
-          {tab === 'billing' && isOwner && (
+          {/* BILLING IS GLOBALLY RENDERED OUTSIDE isOwner restriction */}
+          {tab === 'billing' && (
             <BillingConfig />
           )}
 
