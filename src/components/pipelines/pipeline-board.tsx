@@ -106,7 +106,7 @@ export function PipelineBoard({
           stage cleanly at the viewport edge instead of mid-column.
           Disabled on lg+ because the full board fits without scroll
           there and snapping would interfere with the natural layout. */}
-      <div className="pipeline-scroll flex snap-x snap-mandatory gap-3 overflow-x-auto pb-4 lg:snap-none">
+      <div className="pipeline-scroll flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 lg:snap-none">
         {sortedStages.map((stage) => {
           const stageDeals = dealsByStage.get(stage.id) ?? [];
           const totalValue = stageDeals.reduce(
@@ -146,18 +146,28 @@ export function PipelineBoard({
         ) : null}
       </DragOverlay>
 
+      {/* কাস্টম প্রিমিয়াম ডার্ক-পার্পেল স্ক্রোলবার ডিজাইন */}
       <style jsx>{`
         .pipeline-scroll {
           scroll-behavior: smooth;
         }
-        @media (hover: hover) and (pointer: fine) {
-          .pipeline-scroll::-webkit-scrollbar {
-            height: 0;
-            display: none;
-          }
-          .pipeline-scroll {
-            scrollbar-width: none;
-          }
+        .pipeline-scroll::-webkit-scrollbar {
+          height: 6px;
+        }
+        .pipeline-scroll::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.3);
+          border-radius: 999px;
+        }
+        .pipeline-scroll::-webkit-scrollbar-thumb {
+          background: rgba(71, 85, 105, 0.4);
+          border-radius: 999px;
+        }
+        .pipeline-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(139, 92, 246, 0.6); /* হোভার করলে পার্পেল গ্লো হবে */
+        }
+        .pipeline-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(71, 85, 105, 0.4) rgba(15, 23, 42, 0.3);
         }
       `}</style>
     </DndContext>
@@ -180,13 +190,10 @@ function StageColumn({
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
 
   return (
-    // On mobile each column is `w-[85vw]` (with a reasonable min/max)
-    // so the next column's edge peeks in — a "there's more here" hint.
-    // snap-start lands each column cleanly when swiping. On lg+ we
-    // restore the flex-1 share-the-row behavior. The droppable ref is
-    // on the inner messages region below — intentionally NOT here, so
-    // a drag over the column header doesn't highlight the whole column.
-    <div className="flex w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col rounded-xl border border-slate-800 bg-slate-900/60 p-4 lg:w-auto lg:max-w-none lg:flex-1 lg:basis-[260px] lg:shrink lg:snap-none">
+    // On mobile each column is `w-[85vw]`. On desktop (lg+), we lock the width 
+    // to `w-[300px]` and disable shrink (lg:shrink-0) so columns don't squeeze 
+    // each other and can overflow beautifully to enable smooth horizontal scrolling.
+    <div className="flex w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col rounded-xl border border-slate-800 bg-slate-900/60 p-4 lg:w-[300px] lg:max-w-none lg:shrink-0 lg:snap-none">
       {/* 3px colored top border — sits above the column's padding */}
       <div
         className="-mx-4 -mt-4 h-[3px] rounded-t-xl"
