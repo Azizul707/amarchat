@@ -8,6 +8,49 @@ interface BillingPayload {
   selected_plan: string
 }
 
+// আপনার টেলিগ্রাম আইডিতে স্বয়ংক্রিয় পুশ নোটিফিকেশন পাঠানোর ড্রাইভার ফাংশন
+async function sendTelegramAlert(
+  token: string,
+  chatId: string,
+  plan: string,
+  method: string,
+  sender: string,
+  txId: string,
+  email: string
+) {
+  try {
+    const text = `🔔 *New Payment Request Received!*
+    
+*Plan:* ${plan}
+*Method:* ${method.toUpperCase()}
+*Sender:* \`${sender}\`
+*TxnID:* \`${txId}\`
+*User Email:* \`${email}\`
+
+_Please verify the Transaction ID on your phone and manually approve this user from Supabase._`;
+
+    const url = `https://api.telegram.org/bot${token}/sendMessage`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text,
+        parse_mode: 'Markdown'
+      })
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.error('[telegram-notify] API responded with error:', err)
+    } else {
+      console.log('[telegram-notify] Push notification dispatched successfully.')
+    }
+  } catch (err) {
+    console.error('[telegram-notify] Failed to dispatch push notification:', err)
+  }
+}
+
 // ১. কাস্টমারের পূর্ববর্তী পেমেন্ট রিকোয়েস্টগুলোর স্ট্যাটাস রিড করার GET এপিআই
 export async function GET() {
   try {
@@ -68,6 +111,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'All fields are required.' }, { status: 400 })
     }
 
+    const cleanTxnId = transaction_id.trim().toUpperCase()
+
     // নতুন পেন্ডিং পেমেন্ট রিকোয়েস্ট ডাটাবেসে সেভ করা হচ্ছে
     const { data: newRequest, error: insertError } = await supabase
       .from('payment_requests')
@@ -76,7 +121,7 @@ export async function POST(request: Request) {
         workspace_id: profile.workspace_id,
         payment_method: payment_method.trim().toLowerCase(),
         sender_number: sender_number.trim(),
-        transaction_id: transaction_id.trim().toUpperCase(), // ট্রানজেকশন আইডি বড় হাতের অক্ষরে সেভ করা হচ্ছে
+        transaction_id: cleanTxnId,
         selected_plan: selected_plan.trim(),
         status: 'pending'
       })
@@ -86,7 +131,7 @@ export async function POST(request: Request) {
     if (insertError) {
       console.error('[billing-api] Insert error:', insertError)
       
-      // ডুপ্লিকেট ট্রানজেকশন আইডি (Unique Constraint - 23505) এরর হ্যান্ডলিং
+      // ডুপ্লিকেট ট্রানজেকশন আইডি (Unique Constraint) এরর হ্যান্ডলিং
       if (insertError.code === '23505') {
         return NextResponse.json({ 
           error: 'This Transaction ID (TxnID) has already been submitted for verification.' 
@@ -94,6 +139,25 @@ export async function POST(request: Request) {
       }
       
       return NextResponse.json({ error: 'Failed to submit billing verification request' }, { status: 500 })
+    }
+
+    // **৩. সুরক্ষিত ব্যাকগ্রাউন্ড টেলিগ্রাম পুশ অ্যালার্ট ট্রিগার**
+    const botToken = process.env.TELEGRAM_BOT_TOKEN
+    const chatId = process.env.TELEGRAM_CHAT_ID
+
+    if (botToken && chatId) {
+      // ফায়ার অ্যান্ড ফরগেট (Background execution)
+      sendTelegramAlert(
+        botToken,
+        chatId,
+        selected_plan,
+        payment_method,
+        sender_number,
+        cleanTxnId,
+        user.email || 'N/A'
+      ).catch((err) => console.error('[telegram-notify] Background trigger error:', err))
+    } else {
+      console.warn('[telegram-notify] Missing process.env configuration. Push skipped.')
     }
 
     return NextResponse.json({ success: true, data: newRequest }, { status: 200 })
