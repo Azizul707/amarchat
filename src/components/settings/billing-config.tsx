@@ -16,7 +16,7 @@ interface PaymentRequest {
 }
 
 interface BillingConfigProps {
-  isApproved?: boolean; // ওনার প্যানেলের ডাইনামিক এপ্রুভাল স্টেট
+  isApproved?: boolean;
 }
 
 export function BillingConfig({ isApproved = false }: BillingConfigProps) {
@@ -32,7 +32,14 @@ export function BillingConfig({ isApproved = false }: BillingConfigProps) {
   const fetchHistory = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/settings/billing');
+      // **ডাইনামিক ক্যাশ বাস্টিং ট্র্যাকার** (Date.now() যুক্ত করে ব্রাউজার ও সিডিএন ক্যাশ ধ্বংস করা হলো)
+      const res = await fetch(`/api/settings/billing?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const result = await res.json();
         if (result.data) {
@@ -93,7 +100,6 @@ export function BillingConfig({ isApproved = false }: BillingConfigProps) {
   };
 
   const getStatusBadge = (status: string) => {
-    // ডাইনামিক ফ্রন্টএন্ড ওভাররাইড লজিক: ইউজার যদি প্রোফাইলে অলরেডি এপ্রুভড হয়ে যায়, তবে স্ট্যাটাস এপ্রুভড দেখাবে
     const effectiveStatus = isApproved ? 'approved' : status;
 
     switch (effectiveStatus) {

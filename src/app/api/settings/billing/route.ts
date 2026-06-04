@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-// নেক্সট জেএস এপিআই ক্যাশিং ও ডেটা লিক বন্ধ করতে ডাইনামিক রানটাইম বাধ্য করা হলো
 export const dynamic = 'force-dynamic'
 
 interface BillingPayload {
@@ -45,6 +44,8 @@ _Please verify the Transaction ID on your phone and manually approve this user f
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       console.error('[telegram-notify] API responded with error:', err)
+    } else {
+      console.log('[telegram-notify] Push notification dispatched successfully.')
     }
   } catch (err) {
     console.error('[telegram-notify] Failed to dispatch push notification:', err)
@@ -55,13 +56,12 @@ export async function GET() {
   try {
     const supabase = await createClient()
     
-    // Auth session check
+    // Auth check
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ১০০% আইসোলেটেড কুয়েরি: শুধুমাত্র লগইন করা ইউজারের নিজস্ব আইডি দিয়ে কঠোরভাবে ফিল্টার করা হচ্ছে
     const { data: requests, error: queryError } = await supabase
       .from('payment_requests')
       .select('id, payment_method, sender_number, transaction_id, selected_plan, status, created_at')
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     
-    // Auth session check
+    // Auth check
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -135,11 +135,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to submit billing verification request' }, { status: 500 })
     }
 
+    // **৩. সুরক্ষিত সিঙ্ক্রোনাস ওয়েটিং মেকানিজম** (Vercel Container Freeze Protection)
     const botToken = process.env.TELEGRAM_BOT_TOKEN
     const chatId = process.env.TELEGRAM_CHAT_ID
 
     if (botToken && chatId) {
-      sendTelegramAlert(
+      // এপিআই কল সম্পূর্ণ শেষ হওয়া পর্যন্ত অপেক্ষা (Await) করা হবে
+      await sendTelegramAlert(
         botToken,
         chatId,
         selected_plan,
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
         sender_number,
         cleanTxnId,
         user.email || 'N/A'
-      ).catch((err) => console.error('[telegram-notify] Background trigger error:', err))
+      )
     }
 
     return NextResponse.json({ success: true, data: newRequest }, { status: 200 })
