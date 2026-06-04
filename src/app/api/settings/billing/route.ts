@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-// নেক্সট জেএস এপিআই ক্যাশিং বাগ প্রতিরোধ করতে ডায়নামিক রানটাইম ফোর্স করা হলো
+// নেক্সট জেএস এপিআই ক্যাশিং ও ডেটা লিক বন্ধ করতে ডাইনামিক রানটাইম বাধ্য করা হলো
 export const dynamic = 'force-dynamic'
 
 interface BillingPayload {
@@ -45,8 +45,6 @@ _Please verify the Transaction ID on your phone and manually approve this user f
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       console.error('[telegram-notify] API responded with error:', err)
-    } else {
-      console.log('[telegram-notify] Push notification dispatched successfully.')
     }
   } catch (err) {
     console.error('[telegram-notify] Failed to dispatch push notification:', err)
@@ -57,16 +55,16 @@ export async function GET() {
   try {
     const supabase = await createClient()
     
-    // Auth check
+    // Auth session check
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // ডাটাবেস থেকে রিয়েল-টাইমে এই ইউজারের পেমেন্ট হিস্ট্রি রিড করা হচ্ছে
+    // ১০০% আইসোলেটেড কুয়েরি: শুধুমাত্র লগইন করা ইউজারের নিজস্ব আইডি দিয়ে কঠোরভাবে ফিল্টার করা হচ্ছে
     const { data: requests, error: queryError } = await supabase
       .from('payment_requests')
-      .select('*')
+      .select('id, payment_method, sender_number, transaction_id, selected_plan, status, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -86,7 +84,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     
-    // Auth check
+    // Auth session check
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
