@@ -581,6 +581,31 @@ async function sendWhatsAppImageMessage(
   }
 }
 
+function cleanImageUrl(url: string): string {
+  if (!url) return '';
+  let cleaned = url.trim();
+
+  if (cleaned.includes('<img') && cleaned.includes('src=')) {
+    const srcMatch = cleaned.match(/src=["'](https?:\/\/[^"']+)["']/i);
+    if (srcMatch && srcMatch[1]) {
+      cleaned = srcMatch[1];
+    }
+  }
+
+  if (cleaned.includes('i.ibb.co.com')) {
+    cleaned = cleaned.replace('i.ibb.co.com', 'i.ibb.co');
+  }
+
+  if (cleaned.includes('drive.google.com/file/d/')) {
+    const driveMatch = cleaned.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (driveMatch && driveMatch[1]) {
+      cleaned = `https://drive.google.com/uc?id=${driveMatch[1]}`;
+    }
+  }
+
+  return cleaned;
+}
+
 async function fetchGoogleSheetInventory(sheetId: string): Promise<string> {
   try {
     console.log('[google-sheets] Fetching inventory rows from Sheet ID:', sheetId)
@@ -606,7 +631,13 @@ async function fetchGoogleSheetInventory(sheetId: string): Promise<string> {
       const productObj: Record<string, string> = {}
       row.c.forEach((cell, idx) => {
         const headerName = headers[idx] || `col_${idx}`
-        productObj[headerName] = cell && cell.v !== null ? String(cell.v) : ''
+        let cellValue = cell && cell.v !== null ? String(cell.v) : ''
+        
+        if (headerName.toLowerCase() === 'image_url') {
+          cellValue = cleanImageUrl(cellValue)
+        }
+
+        productObj[headerName] = cellValue
       })
       return productObj
     })
@@ -1093,16 +1124,16 @@ GREETING & DOMAIN RULES (CRITICAL):
 PRODUCT INVENTORY & IMAGES (CRITICAL):
 - If the customer asks "কী কী পণ্য আছে?", "দাম কত?", or wants to see photos, you MUST immediately call the "search_products" tool.
 - Never guess, estimate, or invent product specifications or prices. Always fetch from sheets.
-- CRITICAL MEDIA RULE: If you find an image URL during the product search, you MUST output the image URL in this strict bracket format inside your text reply: [MEDIA_URL:https://example.com/product-image.png]. Do not hide or alter this brackets tag; our system reads this token to send native photo attachments!
+- CRITICAL MEDIA RULE: If you find an image URL during the product search, you MUST output the image URL in this strict bracket format inside your text reply: [MEDIA_URL:https://example.com/product-image.png]. Do not hide or alter this brackets tag; our system reads this token to send native photo attachments on WhatsApp!
 
 NEVER HALLUCINATE:
 - You are allowed to provide information ONLY if it exists in the provided Business Knowledge Base or live Google Sheets catalog. If the info is missing, politely say you do not have that specific information.
 
 ORDER FUNNEL & STRICT DATA COLLECTION:
 - Act like a smart telesales executive. To confirm an order, you MUST collect 3 distinct pieces of information:
-  1. Real Name (আসল নাম)
-  2. 11-digit Phone Number (Must start with 01)
-  3. Full Delivery Address (Must contain area/village, thana, district)
+  1. Real Name (আসল নাম).
+  2. 11-digit Phone Number (Must start with 01).
+  3. Full Address (Must contain area/village, thana, district).
 - Step 1: If they express interest or select a package, DO NOT CONFIRM. Actively ask for their missing details: "অর্ডারটি কনফার্ম করতে দয়া করে আপনার সুন্দর নামটি, কন্টাক্ট নাম্বার এবং সম্পূর্ণ ঠিকানাটি দিন।"
 - Step 2 (Partial Info Validation):
   * If they give a phone number and address but NO name, reply: "ধন্যবাদ সম্মানিত গ্রাহক! কুরিয়ারের জন্য দয়া করে আপনার আসল নামটি জানাবেন।"
@@ -1116,10 +1147,10 @@ ORDER CONFIRMATION & SAVING PROTOCOL:
   * Never use "BDT". Always use "টাকা". Use "আসসালামু আলাইকুম", "ইনশাআল্লাহ", "আলহামদুলিল্লাহ" naturally. Always use Line Breaks (Enter) for invoices.
 
 HUMAN HANDOVER:
-- If a customer becomes angry, confused, or asks to talk to a human, say: "আমি এখনই আমাদের একজন এক্সপার্টকে আপনার সাথে কানেক্ট করে দিচ্ছি। دয়া করে একটু অপেক্ষা করুন।" Then stop replying.`
+- If a customer becomes angry, confused, or asks to talk to a human, say: "আমি এখনই আমাদের একজন এক্সপার্টকে আপনার সাথে কানেক্ট করে দিচ্ছি। দয়া করে একটু অপেক্ষা করুন।" Then stop replying.`
           },
-          // পূর্ববর্তী চ্যাট ইতিহাস ডাইনামিকালি ইনজেক্ট করা হচ্ছে (যাতে এআই ১ সেকেন্ড আগের কথা ভুলে না যায়)
-          ...chatHistory.filter((h) => h.content !== contentText), // ডুপ্লিকেট কারেন্ট মেসেজ ওভারল্যাপ এড়ানো হচ্ছে
+          // পূর্ববর্তী চ্যাট ইতিহাস ডাইনামিকালি ইনজেক্ট করা হচ্ছে
+          ...chatHistory.filter((h) => h.content !== contentText),
           {
             role: 'user',
             content: userMessageContent
@@ -1144,7 +1175,6 @@ HUMAN HANDOVER:
         const choice = gptData.choices[0]
         let aiMessage = choice.message
 
-        // ৪.ツールコーリング (Function Calling) ループハンドラー
         if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
           console.log('[webhook-ai] Tool call requested by GPT model.');
           const toolResults: unknown[] = []
@@ -1201,12 +1231,11 @@ HUMAN HANDOVER:
         const aiReplyText = aiMessage.content || '[নিরাপত্তাজনিত কারণে মেসেজ তৈরি করা যায়নি]'
         console.log('[webhook-ai] Success response:', aiReplyText);
 
-        // ৫. হোয়াটসঅ্যাপ মিডিয়া এপিআই ট্রানজিশন
         const mediaRegex = /\[MEDIA_URL:(https?:\/\/[^\]]+)\]/i
         const mediaMatch = aiReplyText.match(mediaRegex)
 
         if (mediaMatch && mediaMatch[1]) {
-          const imageUrl = mediaMatch[1].trim()
+          const imageUrl = cleanImageUrl(mediaMatch[1].trim())
           const cleanCaption = aiReplyText.replace(mediaRegex, '').trim()
           
           await sendWhatsAppImageMessage(senderPhone, imageUrl, cleanCaption, phoneNumberId, accessToken)
