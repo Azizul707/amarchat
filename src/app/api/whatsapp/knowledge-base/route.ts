@@ -76,21 +76,47 @@ export async function POST(request: Request) {
     const embeddingData = await embeddingRes.json()
     const embeddingVector = embeddingData.data[0].embedding
 
-    // ১-টু-১ মেকানিজম: সুপাবেস অ্যাটমিক ডাইনামিক আপসেট (রেস-কন্ডিশন এড়াতে)
-    const { error: dbError } = await supabase
+    // **১. প্রথমে চেক করছি এই ওয়ার্কস্পেসের জন্য ইতিপূর্বে কোনো নলেজ বেস আছে কিনা**
+    const { data: existingKb, error: fetchError } = await supabase
       .from('knowledge_base')
-      .upsert({
-        workspace_id: profile.workspace_id,
-        content: content,
-        embedding: embeddingVector,
-        created_at: new Date().toISOString(),
-      }, {
-        onConflict: 'workspace_id' // ওয়ান-টু-ওয়ান ইউনিকনেস কনস্ট্রেইন্ট ব্যবহার করা হচ্ছে
-      })
+      .select('id')
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle()
 
-    if (dbError) {
-      console.error('Database upsert failed:', dbError.message)
-      return NextResponse.json({ error: 'Failed to save to database' }, { status: 500 })
+    if (fetchError) {
+      console.error('Failed to query existing knowledge base:', fetchError.message)
+      return NextResponse.json({ error: `Database verification failed: ${fetchError.message}` }, { status: 500 })
+    }
+
+    let saveError = null
+
+    if (existingKb) {
+      // **২. ডাটা থাকলে: পুরানো ডাটা সম্পূর্ণ REPLACE করে শুধুমাত্র লেটেস্ট ডাটা রাখা হচ্ছে**
+      const { error } = await supabase
+        .from('knowledge_base')
+        .update({
+          content: content,
+          embedding: embeddingVector,
+          created_at: new Date().toISOString()
+        })
+        .eq('workspace_id', profile.workspace_id)
+      saveError = error
+    } else {
+      // **৩. ডাটা না থাকলে: নতুন রো হিসেবে INSERT করা হচ্ছে**
+      const { error } = await supabase
+        .from('knowledge_base')
+        .insert({
+          workspace_id: profile.workspace_id,
+          content: content,
+          embedding: embeddingVector,
+          created_at: new Date().toISOString()
+        })
+      saveError = error
+    }
+
+    if (saveError) {
+      console.error('Database save action failed:', saveError.message)
+      return NextResponse.json({ error: `Database Error: ${saveError.message}` }, { status: 500 })
     }
 
     return NextResponse.json({ status: 'trained' }, { status: 200 })
@@ -133,7 +159,7 @@ export async function GET() {
     return NextResponse.json(data || null, { 
       status: 200,
       headers: {
-        'Cache-Control': 'no-store, max-age=0, must-revalidate' // এপিআই গেটওয়ে ক্যাশ প্রতিরোধক
+        'Cache-Control': 'no-store, max-age=0, must-revalidate'
       }
     })
   } catch (err) {
