@@ -144,12 +144,34 @@ export default function InboxContent() {
       const loggedInUserId = currentUserIdRef.current;
 
       if (event.eventType === "INSERT") {
-        setConversations((prev) => {
-          if (prev.some((c) => c.id === conv.id)) {
-            return prev;
+        // **রিয়েল-টাইম "Unknown" এবং UI হ্যাং হওয়া সমস্যার স্থায়ী সমাধান**
+        const fetchFullConversation = async () => {
+          const supabase = createClient();
+          const { data: fullConv, error } = await supabase
+            .from("conversations")
+            .select("*, contact:contacts(*)") // WABA এবং Contacts কন্টাক্ট জয়েন কুয়েরি
+            .eq("id", conv.id)
+            .maybeSingle();
+
+          if (!error && fullConv) {
+            setConversations((prev) => {
+              if (prev.some((c) => c.id === fullConv.id)) {
+                return prev;
+              }
+              return [fullConv as unknown as Conversation, ...prev];
+            });
+          } else {
+            // কোনো কারণে ফেইল হলে সেফ ফলব্যাক
+            setConversations((prev) => {
+              if (prev.some((c) => c.id === conv.id)) {
+                return prev;
+              }
+              return [conv, ...prev];
+            });
           }
-          return [conv, ...prev];
-        });
+        };
+
+        fetchFullConversation();
       }
 
       if (event.eventType === "UPDATE") {
